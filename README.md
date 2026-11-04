@@ -5,3 +5,22 @@ Opinionated asset-backed game authoring for Bevy.
 - [inslag_loot](crates/inslag_loot/): weighted choices, reusable tables, and relationships between generated results.
 
 Disclaimer: this is not production ready. Expect breaking changes.
+
+## Lints
+
+Dylint is supported!
+
+```toml
+[workspace.metadata.dylint]
+libraries = [
+    { git = "https://github.com/fxyoge/inslag.git", rev = "<sha>", pattern = "lints/*" },
+]
+```
+
+Then run:
+
+```sh
+cargo dylint --all -- --all-targets --locked --config 'build.rustflags=["-Zalways-encode-mir"]'
+```
+
+`-Zalways-encode-mir` enables checks that inspect dependency method bodies.

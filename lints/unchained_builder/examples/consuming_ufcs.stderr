@@ -1,0 +1,13 @@
+warning: builder calls should be chained
+  --> $DIR/consuming_ufcs.rs:11:19
+   |
+LL |       let request = Request::header(request, 1);
+   |  ___________________^
+LL | |     let request = Request::header(request, 2);
+   | |_____________________________________________^
+   |
+   = help: combine these builder calls into a single method chain
+   = note: `#[warn(unchained_builder)]` on by default
+
+warning: 1 warning emitted
+

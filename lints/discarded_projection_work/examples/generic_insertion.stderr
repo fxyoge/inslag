@@ -1,0 +1,42 @@
+error: projection builds unused fields: map, queue, text
+  --> $DIR/generic_insertion.rs:26:5
+   |
+LL |     project(input, text).count
+   |     ^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this caller uses only these fields: count
+note: `text` is built here but not used by this caller
+  --> $DIR/generic_insertion.rs:20:15
+   |
+LL |         text: copy,
+   |               ^^^^
+note: this insertion only builds an unused field
+  --> $DIR/generic_insertion.rs:11:5
+   |
+LL |     copy.push_str(text);
+   |     ^^^^^^^^^^^^^^^^^^^
+note: `queue` is built here but not used by this caller
+  --> $DIR/generic_insertion.rs:21:9
+   |
+LL |         queue,
+   |         ^^^^^
+note: this insertion only builds an unused field
+  --> $DIR/generic_insertion.rs:15:9
+   |
+LL |         queue.push_back(value);
+   |         ^^^^^^^^^^^^^^^^^^^^^^
+note: `map` is built here but not used by this caller
+  --> $DIR/generic_insertion.rs:22:9
+   |
+LL |         map,
+   |         ^^^
+note: this insertion only builds an unused field
+  --> $DIR/generic_insertion.rs:16:9
+   |
+LL |         map.insert(value, value);
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: compute or capture only the values this caller needs
+   = note: `#[deny(discarded_projection_work)]` on by default
+
+error: aborting due to 1 previous error
+

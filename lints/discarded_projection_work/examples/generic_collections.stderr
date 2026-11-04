@@ -1,0 +1,48 @@
+error: projection builds unused fields: heap, list, map, queue, set, text
+  --> $DIR/generic_collections.rs:27:5
+   |
+LL |     project(values, text).count
+   |     ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this caller uses only these fields: count
+note: `text` is built here but not used by this caller
+  --> $DIR/generic_collections.rs:17:15
+   |
+LL |         text: text.clone(),
+   |               ^^^^^^^^^^^^
+   = note: this copy only builds an unused field
+note: `queue` is built here but not used by this caller
+  --> $DIR/generic_collections.rs:18:16
+   |
+LL |         queue: values.iter().copied().collect(),
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: this iterator is collected only to build an unused field
+note: `list` is built here but not used by this caller
+  --> $DIR/generic_collections.rs:19:15
+   |
+LL |         list: values.iter().copied().collect(),
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: this iterator is collected only to build an unused field
+note: `map` is built here but not used by this caller
+  --> $DIR/generic_collections.rs:20:14
+   |
+LL |         map: values.iter().map(|&value| (value, value)).collect(),
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: this iterator is collected only to build an unused field
+note: `set` is built here but not used by this caller
+  --> $DIR/generic_collections.rs:21:14
+   |
+LL |         set: values.iter().copied().collect(),
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: this iterator is collected only to build an unused field
+note: `heap` is built here but not used by this caller
+  --> $DIR/generic_collections.rs:22:15
+   |
+LL |         heap: values.iter().copied().collect(),
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: this iterator is collected only to build an unused field
+   = help: compute or capture only the values this caller needs
+   = note: `#[deny(discarded_projection_work)]` on by default
+
+error: aborting due to 1 previous error
+

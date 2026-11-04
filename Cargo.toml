@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/*"]
+exclude = ["lints"]
 resolver = "3"
 
 [workspace.package]
@@ -33,6 +34,7 @@ all = "warn"
 
 [workspace.metadata.dylint]
 libraries = [
+    { path = "lints", pattern = "*" },
     { git = "https://github.com/trailofbits/dylint", tag = "v6.3.2", pattern = "examples/general/basic_dead_store" },
     { git = "https://github.com/trailofbits/dylint", tag = "v6.3.2", pattern = "examples/general/crate_wide_allow" },
     { git = "https://github.com/trailofbits/dylint", tag = "v6.3.2", pattern = "examples/restriction/non_topologically_sorted_functions" },

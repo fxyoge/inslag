@@ -1,0 +1,13 @@
+warning: builder calls should be chained
+  --> $DIR/assignment.rs:11:15
+   |
+LL |       request = request.header(1);
+   |  _______________^
+LL | |     request = request.header(2).header(3);
+   | |_________________________________________^
+   |
+   = help: combine these builder calls into a single method chain
+   = note: `#[warn(unchained_builder)]` on by default
+
+warning: 1 warning emitted
+

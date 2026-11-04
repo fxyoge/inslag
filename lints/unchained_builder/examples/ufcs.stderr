@@ -1,0 +1,12 @@
+warning: builder calls should be chained
+  --> $DIR/ufcs.rs:11:5
+   |
+LL | /     Settings::option(settings, 1);
+LL | |     Settings::option(settings, 2);
+   | |_________________________________^
+   |
+   = help: combine these builder calls into a single method chain
+   = note: `#[warn(unchained_builder)]` on by default
+
+warning: 1 warning emitted
+

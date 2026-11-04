@@ -1,0 +1,12 @@
+warning: builder calls should be chained
+  --> $DIR/named_guard.rs:20:5
+   |
+LL | /     settings.option(guard.value());
+LL | |     settings.option(2);
+   | |______________________^
+   |
+   = help: combine these builder calls into a single method chain
+   = note: `#[warn(unchained_builder)]` on by default
+
+warning: 1 warning emitted
+

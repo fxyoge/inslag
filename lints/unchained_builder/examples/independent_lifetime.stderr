@@ -1,0 +1,15 @@
+warning: builder calls should be chained
+  --> $DIR/independent_lifetime.rs:9:5
+   |
+LL | /     settings.option(&value);
+LL | |     settings.option({
+LL | |         value += 1;
+LL | |         &value
+LL | |     });
+   | |______^
+   |
+   = help: combine these builder calls into a single method chain
+   = note: `#[warn(unchained_builder)]` on by default
+
+warning: 1 warning emitted
+

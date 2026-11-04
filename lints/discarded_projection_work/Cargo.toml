@@ -1,0 +1,22 @@
+[package]
+name = "discarded_projection_work"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Reject unnecessary work to build unused result fields"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+dylint_linting.workspace = true
+
+[dev-dependencies]
+dylint_testing.workspace = true
+bevy_ecs.workspace = true
+
+[lints]
+workspace = true
+
+[package.metadata.rust-analyzer]
+rustc_private = true

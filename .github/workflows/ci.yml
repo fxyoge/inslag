@@ -74,3 +74,63 @@ jobs:
       run: cargo test --locked --workspace --no-default-features
     - name: Check benchmarks
       run: cargo check --locked --workspace --benches --no-default-features
+
+  lint-quality:
+    name: Dylint formatting, Clippy, and docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUSTDOCFLAGS: -D warnings
+    defaults:
+      run:
+        working-directory: lints
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Install Rust
+      run: rustup show active-toolchain
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        key: lint-quality
+        workspaces: |
+          . -> target
+          lints -> target
+    - name: Install dylint
+      run: cargo install cargo-dylint dylint-link --version 6.3.2 --locked
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+    - name: Clippy
+      run: cargo clippy --locked --lib --tests -- -D warnings
+    - name: Build documentation
+      run: cargo doc --locked --no-deps
+    - name: Dylint
+      working-directory: .
+      run: cargo dylint --all --fail-on-no-libraries -- --workspace --all-targets --locked --config 'build.rustflags=["-Dwarnings","-Zalways-encode-mir"]'
+
+  lint-test:
+    name: Dylint test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+    defaults:
+      run:
+        shell: bash
+        working-directory: lints
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Install Rust
+      run: rustup show active-toolchain
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        key: lint-test
+        workspaces: lints -> target
+    - name: Install dylint
+      run: cargo install cargo-dylint dylint-link --version 6.3.2 --locked
+    - name: Run UI tests
+      run: cargo test --locked --lib

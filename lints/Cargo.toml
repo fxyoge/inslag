@@ -1,0 +1,17 @@
+[workspace]
+members = ["unchained_builder", "discarded_projection_work"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+dylint_linting = "6.3.2"
+dylint_testing = "6.3.2"
+bevy_ecs = { version = "0.19.1", default-features = false }
+
+[workspace.lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = ['cfg(dylint_lib, values(any()))']

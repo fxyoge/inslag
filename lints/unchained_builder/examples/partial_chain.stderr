@@ -1,0 +1,16 @@
+warning: builder calls should be chained
+  --> $DIR/partial_chain.rs:11:5
+   |
+LL | /     settings.option(1).enabled();
+LL | |     settings.option(2).option(3);
+LL | |     settings.callback(|| {
+LL | |         let value = 4;
+LL | |         value + 1
+LL | |     });
+   | |______^
+   |
+   = help: combine these builder calls into a single method chain
+   = note: `#[warn(unchained_builder)]` on by default
+
+warning: 1 warning emitted
+

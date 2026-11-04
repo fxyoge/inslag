@@ -1,0 +1,22 @@
+error: projection builds unused fields: objects
+  --> $DIR/local_collection.rs:22:5
+   |
+LL |     state.game.projected().tick
+   |     ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this caller uses only these fields: tick
+note: `objects` is built here but not used by this caller
+  --> $DIR/local_collection.rs:17:13
+   |
+LL |             objects,
+   |             ^^^^^^^
+note: this copy only builds an unused field
+  --> $DIR/local_collection.rs:13:23
+   |
+LL |         let objects = self.objects.clone();
+   |                       ^^^^^^^^^^^^^^^^^^^^
+   = help: compute or capture only the values this caller needs
+   = note: `#[deny(discarded_projection_work)]` on by default
+
+error: aborting due to 1 previous error
+

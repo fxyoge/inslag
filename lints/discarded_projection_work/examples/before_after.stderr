@@ -1,0 +1,33 @@
+error: projection builds unused fields: objects
+  --> $DIR/before_after.rs:12:18
+   |
+LL |     let before = state.game.snapshot();
+   |                  ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this caller uses only these fields: tick
+note: `objects` is built here but not used by this caller
+  --> $SRC_DIR/examples/support/model.rs:33:22
+   |
+LL |             objects: self.objects.clone(),
+   |                      ^^^^^^^^^^^^^^^^^^^^
+   = note: this copy only builds an unused field
+   = help: compute or capture only the values this caller needs
+   = note: `#[deny(discarded_projection_work)]` on by default
+
+error: projection builds unused fields: objects
+  --> $DIR/before_after.rs:14:17
+   |
+LL |     let after = state.game.snapshot();
+   |                 ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this caller uses only these fields: tick
+note: `objects` is built here but not used by this caller
+  --> $SRC_DIR/examples/support/model.rs:33:22
+   |
+LL |             objects: self.objects.clone(),
+   |                      ^^^^^^^^^^^^^^^^^^^^
+   = note: this copy only builds an unused field
+   = help: compute or capture only the values this caller needs
+
+error: aborting due to 2 previous errors
+

@@ -1,0 +1,12 @@
+warning: builder calls should be chained
+  --> $DIR/type_alias.rs:12:5
+   |
+LL | /     OtherName::option(settings, 1);
+LL | |     settings.option(2);
+   | |______________________^
+   |
+   = help: combine these builder calls into a single method chain
+   = note: `#[warn(unchained_builder)]` on by default
+
+warning: 1 warning emitted
+

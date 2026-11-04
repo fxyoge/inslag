@@ -1,0 +1,22 @@
+error: projection builds unused fields: objects
+  --> $DIR/inclusive_range.rs:27:5
+   |
+LL |     state.snapshot().tick
+   |     ^^^^^^^^^^^^^^^^
+   |
+   = note: this caller uses only these fields: tick
+note: `objects` is built here but not used by this caller
+  --> $DIR/inclusive_range.rs:22:13
+   |
+LL |             objects,
+   |             ^^^^^^^
+note: this insertion only builds an unused field
+  --> $DIR/inclusive_range.rs:18:13
+   |
+LL |             objects.push(x);
+   |             ^^^^^^^^^^^^^^^
+   = help: compute or capture only the values this caller needs
+   = note: `#[deny(discarded_projection_work)]` on by default
+
+error: aborting due to 1 previous error
+

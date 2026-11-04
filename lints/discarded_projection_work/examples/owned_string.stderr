@@ -1,0 +1,18 @@
+error: projection builds unused fields: text
+  --> $DIR/owned_string.rs:13:5
+   |
+LL |     project(text).count
+   |     ^^^^^^^^^^^^^
+   |
+   = note: this caller uses only these fields: count
+note: `text` is built here but not used by this caller
+  --> $DIR/owned_string.rs:9:15
+   |
+LL |         text: text.to_owned(),
+   |               ^^^^^^^^^^^^^^^
+   = note: this copy only builds an unused field
+   = help: compute or capture only the values this caller needs
+   = note: `#[deny(discarded_projection_work)]` on by default
+
+error: aborting due to 1 previous error
+

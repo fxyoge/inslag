@@ -1,0 +1,25 @@
+error: projection builds unused fields: board
+  --> $DIR/nested_materialization.rs:19:5
+   |
+LL |     project(values).count
+   |     ^^^^^^^^^^^^^^^
+   |
+   = note: this caller uses only these fields: count
+note: `board` is built here but not used by this caller
+  --> $DIR/nested_materialization.rs:13:16
+   |
+LL |           board: Board {
+   |  ________________^
+LL | |             values: values.iter().copied().collect(),
+LL | |         },
+   | |_________^
+note: this iterator is collected only to build an unused field
+  --> $DIR/nested_materialization.rs:14:21
+   |
+LL |             values: values.iter().copied().collect(),
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: compute or capture only the values this caller needs
+   = note: `#[deny(discarded_projection_work)]` on by default
+
+error: aborting due to 1 previous error
+

@@ -1,0 +1,12 @@
+warning: builder calls should be chained
+  --> $DIR/delegated_receiver.rs:13:5
+   |
+LL | /     settings.enabled();
+LL | |     settings.enabled();
+   | |______________________^
+   |
+   = help: combine these builder calls into a single method chain
+   = note: `#[warn(unchained_builder)]` on by default
+
+warning: 1 warning emitted
+

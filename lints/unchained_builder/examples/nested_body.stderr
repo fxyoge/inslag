@@ -1,0 +1,12 @@
+warning: builder calls should be chained
+  --> $DIR/nested_body.rs:12:9
+   |
+LL | /         settings.option(1);
+LL | |         settings.option(2);
+   | |__________________________^
+   |
+   = help: combine these builder calls into a single method chain
+   = note: `#[warn(unchained_builder)]` on by default
+
+warning: 1 warning emitted
+

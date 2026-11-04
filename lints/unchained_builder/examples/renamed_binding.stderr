@@ -1,0 +1,13 @@
+warning: builder calls should be chained
+  --> $DIR/renamed_binding.rs:11:17
+   |
+LL |       let first = request.header(1);
+   |  _________________^
+LL | |     let second = first.header(2);
+   | |________________________________^
+   |
+   = help: combine these builder calls into a single method chain
+   = note: `#[warn(unchained_builder)]` on by default
+
+warning: 1 warning emitted
+

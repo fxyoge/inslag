@@ -1,0 +1,12 @@
+warning: builder calls should be chained
+  --> $DIR/returned_branches.rs:14:5
+   |
+LL | /     settings.enabled(true);
+LL | |     settings.enabled(false);
+   | |___________________________^
+   |
+   = help: combine these builder calls into a single method chain
+   = note: `#[warn(unchained_builder)]` on by default
+
+warning: 1 warning emitted
+

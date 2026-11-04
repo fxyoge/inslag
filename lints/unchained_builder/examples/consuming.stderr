@@ -1,0 +1,14 @@
+warning: builder calls should be chained
+  --> $DIR/consuming.rs:11:19
+   |
+LL |       let request = request.header(1);
+   |  ___________________^
+LL | |     let request = request.header(2);
+LL | |     let request = request.header(3);
+   | |___________________________________^
+   |
+   = help: combine these builder calls into a single method chain
+   = note: `#[warn(unchained_builder)]` on by default
+
+warning: 1 warning emitted
+

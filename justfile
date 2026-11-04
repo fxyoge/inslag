@@ -10,13 +10,26 @@ bench: \
 
 docs: _watch-docs
 
-lint:
+lint: \
+  _lint-workspace \
+  _lint-lints \
+  _lint-dylint
+
+_lint-workspace:
     cargo fmt --all --check
     cargo clippy --locked --all-targets -- -D warnings
+
+[working-directory: 'lints']
+_lint-lints:
+    cargo fmt --all --check
+    cargo clippy --locked --lib --tests -- -D warnings
+
+_lint-dylint:
     cargo dylint --all --fail-on-no-libraries -- --workspace --all-targets --locked --config 'build.rustflags=["-Dwarnings","-Zalways-encode-mir"]'
 
 test: \
-  _test-workspace
+  _test-workspace \
+  _test-lints
 
 _bench-loot-execution:
   cargo bench -p inslag_loot --bench execution
@@ -39,3 +52,7 @@ _watch-docs: _build-docs
 
 _test-workspace:
   cargo test --workspace
+
+[working-directory: 'lints']
+_test-lints:
+  cargo test --locked --lib
