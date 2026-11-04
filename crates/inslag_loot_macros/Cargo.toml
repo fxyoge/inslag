@@ -1,0 +1,20 @@
+[package]
+name = "inslag_loot_macros"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Derives for inslag_loot"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true
+proc-macro-crate.workspace = true
+
+[lints]
+workspace = true

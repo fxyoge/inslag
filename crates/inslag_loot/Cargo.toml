@@ -1,0 +1,29 @@
+[package]
+name = "inslag_loot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Asset-backed random grab bags for Bevy"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+inslag_loot_macros.workspace = true
+bevy_app.workspace = true
+bevy_asset.workspace = true
+bevy_ecs.workspace = true
+bevy_reflect.workspace = true
+fastrand.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+bevy_tasks.workspace = true
+divan.workspace = true
+tempfile.workspace = true
+
+[[bench]]
+name = "execution"
+harness = false
+
+[lints]
+workspace = true

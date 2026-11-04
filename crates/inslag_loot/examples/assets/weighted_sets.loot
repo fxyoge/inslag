@@ -1,0 +1,5 @@
+table "forest"
+  #composition
+  choose
+    blood weight=$rare_weight
+    nothing weight=20

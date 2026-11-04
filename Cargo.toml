@@ -1,0 +1,32 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "MIT"
+repository = "https://github.com/fxyoge/inslag"
+
+[workspace.dependencies]
+inslag_loot_macros = { version = "0.1.0", path = "crates/inslag_loot_macros" }
+bevy_app = "0.20.0"
+bevy_asset = "0.20.0"
+bevy_ecs = { version = "0.20.0", features = ["multi_threaded"] }
+bevy_reflect = "0.20.0"
+bevy_tasks = "0.20.0"
+fastrand = "2"
+thiserror = "2.0"
+divan = "0.1.21"
+tempfile = "3"
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+proc-macro-crate = "3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"

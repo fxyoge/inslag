@@ -1,0 +1,7 @@
+table "root"
+  choose rolls=8
+    1 weight=10
+    2 weight=3
+    all
+      3
+      4

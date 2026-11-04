@@ -1,0 +1,16 @@
+table "risky-revision"
+  choose
+    all weight=60
+      @attribute field=quality multiplier=0.1
+      @attribute field=material multiplier=0.25
+    all weight=10
+      @attribute field=quality multiplier=0
+      @tag tag=ruined
+    nothing weight=12
+    @attribute field=quality multiplier=3 weight=8
+    @tag tag=cursor weight=8
+    all weight=2
+      @item item=complaint_form
+      @item item=complaint_form
+      @tag tag=under_investigation
+  @tag tag=revised

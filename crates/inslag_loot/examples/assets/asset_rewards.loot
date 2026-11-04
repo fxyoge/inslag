@@ -1,0 +1,5 @@
+table "reward" using=item
+  choose
+    leather_tunic weight=5
+    plate_vest weight=3
+    silk_robe weight=2

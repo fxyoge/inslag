@@ -1,0 +1,20 @@
+table "recombine"
+  choose as=base
+    @base item=$left
+    @base item=$right
+  #prefixes left=$left right=$right base=$base
+  #suffixes left=$left right=$right base=$base
+
+table "prefixes" using=affix.sample left=$left right=$right base=$base kind=prefix
+  choose
+    0 weight=1
+    1 weight=4
+    2 weight=3
+    3 weight=1
+
+table "suffixes" using=affix.sample left=$left right=$right base=$base kind=suffix
+  choose
+    0 weight=1
+    1 weight=4
+    2 weight=3
+    3 weight=1

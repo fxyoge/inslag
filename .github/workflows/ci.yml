@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  quality:
+    name: Formatting, Clippy, and docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUSTUP_TOOLCHAIN: stable
+      RUSTDOCFLAGS: -D warnings
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Install Rust
+      run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy --no-self-update
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        key: quality
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+    - name: Clippy (default features)
+      run: cargo clippy --locked --workspace --all-targets -- -D warnings
+    - name: Clippy (all features)
+      run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+    - name: Build documentation
+      run: cargo doc --locked --workspace --no-deps --all-features
+
+  test:
+    name: Test (${{ matrix.os }}, Rust ${{ matrix.rust }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+        rust: [ stable ]
+        include:
+        - os: ubuntu-latest
+          rust: '1.97.1'
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Install Rust
+      run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --no-self-update
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        key: test
+    - name: Run tests and doctests
+      run: cargo test --locked --workspace --no-default-features
+    - name: Check benchmarks
+      run: cargo check --locked --workspace --benches --no-default-features

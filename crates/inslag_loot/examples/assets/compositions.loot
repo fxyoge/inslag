@@ -1,0 +1,7 @@
+table "composition"
+  choose rolls=2 distinct=true
+    all
+      green_slime
+      green_slime
+    azure_slime
+    violet_slime

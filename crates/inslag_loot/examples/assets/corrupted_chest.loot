@@ -1,0 +1,29 @@
+table "corrupted-chest"
+  #armor as=armor
+  #vaal-body-armour armor=$armor
+
+table "armor" using=item sockets=3
+  choose
+    leather_tunic weight=5
+    plate_vest weight=3
+    silk_robe weight=2
+
+table "vaal-body-armour"
+  choose
+    nothing
+    @reforge
+    #vaal-white-sockets armor=$armor
+    #vaal-body-implicit
+  @corrupted
+
+table "vaal-white-sockets" using=sockets.whiten item=$armor
+  choose
+    1 weight=80
+    2 weight=16
+    3 weight=4
+
+table "vaal-body-implicit" using=implicit
+  choose
+    socketed-gem-level value=1
+    socketed-duration-gem-level value=2
+    socketed-aoe-gem-level value=2

@@ -1,0 +1,17 @@
+table "forest-encounter" using=actor
+  azure_slime role=leader
+  choose rolls=2 distinct=true
+    #green-escort
+    #violet-escort
+    #amber-escort
+
+table "green-escort" using=actor
+  choose rolls=2..4
+    green_slime
+
+table "violet-escort" using=actor
+  violet_slime
+
+table "amber-escort" using=actor
+  amber_slime
+  amber_slime
