@@ -291,54 +291,6 @@ impl Catalog {
     }
 }
 
-fn validate_expression_type(
-    expression: &Expression,
-    expected: &ValueType,
-    location: &crate::SourceLocation,
-) -> Result<(), LootError> {
-    let valid = match expression {
-        Expression::Literal(value) => expected.accepts(value),
-        Expression::Range(min, max) => {
-            expected.accepts(&Value::Integer(*min)) && expected.accepts(&Value::Integer(*max))
-        }
-        Expression::Not(_) => expected.accepts(&Value::Boolean(false)),
-        Expression::Variable(_) => true,
-    };
-    if valid {
-        Ok(())
-    } else {
-        Err(LootError::new(
-            location.clone(),
-            format!("expression expects {expected:?}"),
-        ))
-    }
-}
-
-fn validate_arguments(
-    signature: &FunctionSignature,
-    arguments: &BTreeMap<String, Expression>,
-    require_all: bool,
-    location: &crate::SourceLocation,
-) -> Result<(), LootError> {
-    for (name, expression) in arguments {
-        let parameter = signature.parameters.get(name).ok_or_else(|| {
-            LootError::new(location.clone(), format!("unknown argument {name:?}"))
-        })?;
-        validate_expression_type(expression, &parameter.value_type, location)?;
-    }
-    if require_all {
-        for (name, parameter) in &signature.parameters {
-            if !parameter.optional && !arguments.contains_key(name) {
-                return Err(LootError::new(
-                    location.clone(),
-                    format!("missing argument {name:?}"),
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
 fn lower_entries(
     entries: &mut [Entry],
     using: Option<&str>,
@@ -458,6 +410,54 @@ fn lower_entries(
         }
     }
     Ok(())
+}
+
+fn validate_arguments(
+    signature: &FunctionSignature,
+    arguments: &BTreeMap<String, Expression>,
+    require_all: bool,
+    location: &crate::SourceLocation,
+) -> Result<(), LootError> {
+    for (name, expression) in arguments {
+        let parameter = signature.parameters.get(name).ok_or_else(|| {
+            LootError::new(location.clone(), format!("unknown argument {name:?}"))
+        })?;
+        validate_expression_type(expression, &parameter.value_type, location)?;
+    }
+    if require_all {
+        for (name, parameter) in &signature.parameters {
+            if !parameter.optional && !arguments.contains_key(name) {
+                return Err(LootError::new(
+                    location.clone(),
+                    format!("missing argument {name:?}"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_expression_type(
+    expression: &Expression,
+    expected: &ValueType,
+    location: &crate::SourceLocation,
+) -> Result<(), LootError> {
+    let valid = match expression {
+        Expression::Literal(value) => expected.accepts(value),
+        Expression::Range(min, max) => {
+            expected.accepts(&Value::Integer(*min)) && expected.accepts(&Value::Integer(*max))
+        }
+        Expression::Not(_) => expected.accepts(&Value::Boolean(false)),
+        Expression::Variable(_) => true,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(LootError::new(
+            location.clone(),
+            format!("expression expects {expected:?}"),
+        ))
+    }
 }
 
 fn collect_bindings(entries: &[Entry], names: &mut BTreeSet<String>) {

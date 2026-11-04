@@ -102,6 +102,12 @@ fn revise_submission(
     }
 }
 
+fn main() -> AppExit {
+    app()
+        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_millis(1)))
+        .run()
+}
+
 fn app() -> App {
     let mut app = App::new();
     app.add_plugins((
@@ -119,10 +125,4 @@ fn app() -> App {
     .add_systems(Startup, setup)
     .add_systems(Update, (request_revisions, revise_submission));
     app
-}
-
-fn main() -> AppExit {
-    app()
-        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_millis(1)))
-        .run()
 }

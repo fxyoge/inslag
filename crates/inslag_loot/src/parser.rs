@@ -66,16 +66,40 @@ struct Line {
     tokens: Vec<String>,
 }
 
-pub(crate) fn valid_name(name: &str) -> bool {
-    !name.is_empty() && name.split('.').all(valid_variable)
-}
-
-pub(crate) fn valid_variable(name: &str) -> bool {
-    let mut chars = name.chars();
-    chars
-        .next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+pub(crate) fn parse(source: &str, text: &str) -> Result<Vec<Table>, LootError> {
+    let mut lines = Vec::new();
+    for (index, text) in text.lines().enumerate() {
+        let indent = text.bytes().take_while(|&c| c == b' ').count();
+        let location = SourceLocation {
+            source: source.into(),
+            line: index + 1,
+            column: indent + 1,
+        };
+        let tokens = tokens(&text[indent..], &location)?;
+        if !tokens.is_empty() {
+            lines.push(Line {
+                indent,
+                location,
+                tokens,
+            });
+        }
+    }
+    let mut parser = Parser { lines, cursor: 0 };
+    let mut tables = Vec::new();
+    while parser.cursor < parser.lines.len() {
+        tables.push(parser.table()?);
+    }
+    if tables.is_empty() {
+        return Err(LootError::new(
+            SourceLocation {
+                source: source.into(),
+                line: 1,
+                column: 1,
+            },
+            "loot file must declare a table",
+        ));
+    }
+    Ok(tables)
 }
 
 fn tokens(text: &str, location: &SourceLocation) -> Result<Vec<String>, LootError> {
@@ -127,39 +151,22 @@ fn tokens(text: &str, location: &SourceLocation) -> Result<Vec<String>, LootErro
     Ok(tokens)
 }
 
-fn unquote(text: &str, location: &SourceLocation) -> Result<String, LootError> {
-    let quote = text.chars().next().unwrap_or(' ');
-    if !matches!(quote, '\'' | '"') || !text.ends_with(quote) || text.len() < 2 {
-        return Err(LootError::new(location.clone(), "expected a quoted value"));
-    }
-    let mut result = String::new();
-    let mut chars = text[1..text.len() - 1].chars();
-    while let Some(c) = chars.next() {
-        if c == quote {
-            return Err(LootError::new(
-                location.clone(),
-                "unexpected text after quoted value",
-            ));
-        }
-        if c == '\\' {
-            let c = match chars.next() {
-                Some('n') => '\n',
-                Some('t') => '\t',
-                Some('r') => '\r',
-                Some(c @ ('\\' | '\'' | '"')) => c,
-                _ => {
-                    return Err(LootError::new(
-                        location.clone(),
-                        "invalid escape in quoted value",
-                    ));
-                }
-            };
-            result.push(c);
-        } else {
-            result.push(c);
-        }
-    }
-    Ok(result)
+fn expressions(
+    attributes: BTreeMap<String, String>,
+    location: &SourceLocation,
+) -> Result<BTreeMap<String, Expression>, LootError> {
+    attributes
+        .into_iter()
+        .map(|(name, value)| {
+            if crate::function::RESERVED.contains(&name.as_str()) {
+                return Err(LootError::new(
+                    location.clone(),
+                    format!("reserved attribute {name:?} is not valid here"),
+                ));
+            }
+            Ok((name, expression(&value, location)?))
+        })
+        .collect()
 }
 
 fn expression(text: &str, location: &SourceLocation) -> Result<Expression, LootError> {
@@ -215,6 +222,41 @@ fn expression(text: &str, location: &SourceLocation) -> Result<Expression, LootE
     Ok(Expression::Literal(Value::from(text)))
 }
 
+fn unquote(text: &str, location: &SourceLocation) -> Result<String, LootError> {
+    let quote = text.chars().next().unwrap_or(' ');
+    if !matches!(quote, '\'' | '"') || !text.ends_with(quote) || text.len() < 2 {
+        return Err(LootError::new(location.clone(), "expected a quoted value"));
+    }
+    let mut result = String::new();
+    let mut chars = text[1..text.len() - 1].chars();
+    while let Some(c) = chars.next() {
+        if c == quote {
+            return Err(LootError::new(
+                location.clone(),
+                "unexpected text after quoted value",
+            ));
+        }
+        if c == '\\' {
+            let c = match chars.next() {
+                Some('n') => '\n',
+                Some('t') => '\t',
+                Some('r') => '\r',
+                Some(c @ ('\\' | '\'' | '"')) => c,
+                _ => {
+                    return Err(LootError::new(
+                        location.clone(),
+                        "invalid escape in quoted value",
+                    ));
+                }
+            };
+            result.push(c);
+        } else {
+            result.push(c);
+        }
+    }
+    Ok(result)
+}
+
 fn attributes(
     tokens: &[String],
     location: &SourceLocation,
@@ -240,58 +282,16 @@ fn attributes(
     Ok(result)
 }
 
-fn expressions(
-    attributes: BTreeMap<String, String>,
-    location: &SourceLocation,
-) -> Result<BTreeMap<String, Expression>, LootError> {
-    attributes
-        .into_iter()
-        .map(|(name, value)| {
-            if crate::function::RESERVED.contains(&name.as_str()) {
-                return Err(LootError::new(
-                    location.clone(),
-                    format!("reserved attribute {name:?} is not valid here"),
-                ));
-            }
-            Ok((name, expression(&value, location)?))
-        })
-        .collect()
+pub(crate) fn valid_variable(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
 }
 
-pub(crate) fn parse(source: &str, text: &str) -> Result<Vec<Table>, LootError> {
-    let mut lines = Vec::new();
-    for (index, text) in text.lines().enumerate() {
-        let indent = text.bytes().take_while(|&c| c == b' ').count();
-        let location = SourceLocation {
-            source: source.into(),
-            line: index + 1,
-            column: indent + 1,
-        };
-        let tokens = tokens(&text[indent..], &location)?;
-        if !tokens.is_empty() {
-            lines.push(Line {
-                indent,
-                location,
-                tokens,
-            });
-        }
-    }
-    let mut parser = Parser { lines, cursor: 0 };
-    let mut tables = Vec::new();
-    while parser.cursor < parser.lines.len() {
-        tables.push(parser.table()?);
-    }
-    if tables.is_empty() {
-        return Err(LootError::new(
-            SourceLocation {
-                source: source.into(),
-                line: 1,
-                column: 1,
-            },
-            "loot file must declare a table",
-        ));
-    }
-    Ok(tables)
+pub(crate) fn valid_name(name: &str) -> bool {
+    !name.is_empty() && name.split('.').all(valid_variable)
 }
 
 struct Parser {

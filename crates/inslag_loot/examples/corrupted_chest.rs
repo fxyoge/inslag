@@ -146,6 +146,12 @@ fn open_chest(
     }
 }
 
+fn main() -> AppExit {
+    app()
+        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_millis(1)))
+        .run()
+}
+
 fn app() -> App {
     let mut app = App::new();
     app.add_plugins((
@@ -165,10 +171,4 @@ fn app() -> App {
     .add_systems(Startup, request_chest)
     .add_systems(Update, open_chest);
     app
-}
-
-fn main() -> AppExit {
-    app()
-        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_millis(1)))
-        .run()
 }

@@ -106,6 +106,12 @@ fn grant_rewards(
     }
 }
 
+fn main() -> AppExit {
+    app()
+        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_millis(1)))
+        .run()
+}
+
 fn app() -> App {
     let mut app = App::new();
     app.add_plugins((
@@ -127,10 +133,4 @@ fn app() -> App {
     .add_systems(Startup, request_rewards)
     .add_systems(Update, grant_rewards);
     app
-}
-
-fn main() -> AppExit {
-    app()
-        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_millis(1)))
-        .run()
 }

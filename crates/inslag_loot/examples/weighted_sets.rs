@@ -38,6 +38,12 @@ fn spawn_encounter(
     }
 }
 
+fn main() -> AppExit {
+    app()
+        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_millis(1)))
+        .run()
+}
+
 fn app() -> App {
     let mut app = App::new();
     app.add_plugins((
@@ -52,10 +58,4 @@ fn app() -> App {
     .add_systems(Startup, request_encounter)
     .add_systems(Update, spawn_encounter);
     app
-}
-
-fn main() -> AppExit {
-    app()
-        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_millis(1)))
-        .run()
 }

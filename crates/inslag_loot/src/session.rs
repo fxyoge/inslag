@@ -430,29 +430,6 @@ impl Session {
     }
 }
 
-fn evaluate(
-    expression: &Expression,
-    locals: &BTreeMap<String, Value>,
-    random: &mut fastrand::Rng,
-    location: &SourceLocation,
-) -> Result<Value, LootError> {
-    match expression {
-        Expression::Literal(value) => Ok(value.clone()),
-        Expression::Range(min, max) => Ok(Value::Integer(random.i64(*min..=*max))),
-        Expression::Variable(name) => locals
-            .get(name)
-            .cloned()
-            .ok_or_else(|| LootError::new(location.clone(), format!("missing variable ${name}"))),
-        Expression::Not(name) => match locals.get(name) {
-            Some(Value::Boolean(value)) => Ok(Value::Boolean(!value)),
-            _ => Err(LootError::new(
-                location.clone(),
-                format!("!${name} requires a boolean"),
-            )),
-        },
-    }
-}
-
 fn condition(
     entry: &Entry,
     locals: &BTreeMap<String, Value>,
@@ -495,6 +472,29 @@ fn evaluate_arguments(
             ))
         })
         .collect()
+}
+
+fn evaluate(
+    expression: &Expression,
+    locals: &BTreeMap<String, Value>,
+    random: &mut fastrand::Rng,
+    location: &SourceLocation,
+) -> Result<Value, LootError> {
+    match expression {
+        Expression::Literal(value) => Ok(value.clone()),
+        Expression::Range(min, max) => Ok(Value::Integer(random.i64(*min..=*max))),
+        Expression::Variable(name) => locals
+            .get(name)
+            .cloned()
+            .ok_or_else(|| LootError::new(location.clone(), format!("missing variable ${name}"))),
+        Expression::Not(name) => match locals.get(name) {
+            Some(Value::Boolean(value)) => Ok(Value::Boolean(!value)),
+            _ => Err(LootError::new(
+                location.clone(),
+                format!("!${name} requires a boolean"),
+            )),
+        },
+    }
 }
 
 fn validate_inputs(

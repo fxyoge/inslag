@@ -1,6 +1,39 @@
 use crate::*;
 use std::{collections::BTreeMap, sync::Arc};
 
+fn run(text: &str, inputs: BTreeMap<String, Value>, seed: u64) -> (Vec<Value>, Vec<FunctionCall>) {
+    let mut session = Session::new(compile(text), "root", inputs, seed)
+        .unwrap()
+        .with_limits(Limits {
+            max_results: 100_000,
+            ..Limits::default()
+        });
+    let mut calls = Vec::new();
+    loop {
+        match session.advance().unwrap() {
+            Step::Call(call) => {
+                let generated = match call.function.as_str() {
+                    "sample" => vec![Reference::new("sample", calls.len() as u64 + 1).into()],
+                    "identity" => vec![call.arguments.get("value").unwrap().clone()],
+                    "none" => Vec::new(),
+                    _ => unreachable!(),
+                };
+                calls.push(call);
+                session.resume(Ok(generated)).unwrap();
+            }
+            Step::Finished(generated) => return (generated, calls),
+            Step::Waiting => panic!("test forgot to complete a generator"),
+        }
+    }
+}
+
+fn compile(text: &str) -> Arc<Catalog> {
+    Arc::new(Catalog::compile([SourceDocument::new("test.loot", text)], &signatures()).unwrap())
+}
+fn error(text: &str) -> LootError {
+    Catalog::compile([SourceDocument::new("bad.loot", text)], &signatures()).unwrap_err()
+}
+
 fn signatures() -> FunctionSignatures {
     let mut signatures = FunctionSignatures::new();
     signatures
@@ -26,38 +59,6 @@ fn signatures() -> FunctionSignatures {
         )
         .unwrap();
     signatures
-}
-
-fn compile(text: &str) -> Arc<Catalog> {
-    Arc::new(Catalog::compile([SourceDocument::new("test.loot", text)], &signatures()).unwrap())
-}
-fn error(text: &str) -> LootError {
-    Catalog::compile([SourceDocument::new("bad.loot", text)], &signatures()).unwrap_err()
-}
-fn run(text: &str, inputs: BTreeMap<String, Value>, seed: u64) -> (Vec<Value>, Vec<FunctionCall>) {
-    let mut session = Session::new(compile(text), "root", inputs, seed)
-        .unwrap()
-        .with_limits(Limits {
-            max_results: 100_000,
-            ..Limits::default()
-        });
-    let mut calls = Vec::new();
-    loop {
-        match session.advance().unwrap() {
-            Step::Call(call) => {
-                let generated = match call.function.as_str() {
-                    "sample" => vec![Reference::new("sample", calls.len() as u64 + 1).into()],
-                    "identity" => vec![call.arguments.get("value").unwrap().clone()],
-                    "none" => Vec::new(),
-                    _ => unreachable!(),
-                };
-                calls.push(call);
-                session.resume(Ok(generated)).unwrap();
-            }
-            Step::Finished(generated) => return (generated, calls),
-            Step::Waiting => panic!("test forgot to complete a generator"),
-        }
-    }
 }
 
 #[test]

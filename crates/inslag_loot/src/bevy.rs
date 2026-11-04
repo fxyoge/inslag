@@ -149,13 +149,6 @@ impl LootRegistry {
     }
 }
 
-fn invoke(generator: &Arc<PureGenerator>, mut call: FunctionCall) -> Result<Vec<Value>, String> {
-    let mut context = LootFunctionContext::new(&call);
-    let generated = generator(&mut context, &mut call.arguments)?;
-    call.arguments.finish()?;
-    Ok(generated)
-}
-
 /// Loot registration for Bevy apps.
 pub trait LootAppExt {
     /// Registers a loot function under the name used to call it in `.loot` files.
@@ -679,72 +672,6 @@ impl Plugin for LootPlugin {
     }
 }
 
-fn finish(
-    id: RollId,
-    run: Run,
-    result: Result<Vec<Value>, LootError>,
-    finished: &mut MessageWriter<NativeFinished>,
-) {
-    finished.write(NativeFinished {
-        output_type: run.output_type,
-        finished: LootFinished {
-            id,
-            owner: run.owner,
-            #[cfg(test)]
-            trace: run.session.trace().to_vec(),
-            result,
-        },
-    });
-}
-
-fn advance(
-    id: RollId,
-    mut run: Run,
-    runtime: &mut Runtime,
-    registry: &LootRegistry,
-    native: &mut MessageWriter<NativeCall>,
-    finished: &mut MessageWriter<NativeFinished>,
-) {
-    loop {
-        let call = match run.session.advance() {
-            Ok(Step::Call(call)) => call,
-            Ok(Step::Finished(generated)) => {
-                finish(id, run, Ok(generated), finished);
-                return;
-            }
-            Err(error) => {
-                finish(id, run, Err(error), finished);
-                return;
-            }
-            Ok(Step::Waiting) => unreachable!("only contextual generators suspend a roll"),
-        };
-        match registry.generator(&call) {
-            Ok(Generator::Pure(generator)) => {
-                if let Err(error) = run.session.resume(invoke(&generator, call)) {
-                    finish(id, run, Err(error), finished);
-                    return;
-                }
-            }
-            Ok(Generator::Contextual) => {
-                run.waiting = call.index;
-                native.write(NativeCall {
-                    token: Token {
-                        roll: id,
-                        index: call.index,
-                    },
-                    call,
-                });
-                runtime.runs.insert(id, run);
-                return;
-            }
-            Err(error) => {
-                finish(id, run, Err(error), finished);
-                return;
-            }
-        }
-    }
-}
-
 #[derive(bevy_ecs::system::SystemParam)]
 struct Ingress<'w, 's> {
     requests: MessageReader<'w, 's, NativeRequest>,
@@ -855,4 +782,77 @@ fn drive(
             }
         }
     }
+}
+
+fn advance(
+    id: RollId,
+    mut run: Run,
+    runtime: &mut Runtime,
+    registry: &LootRegistry,
+    native: &mut MessageWriter<NativeCall>,
+    finished: &mut MessageWriter<NativeFinished>,
+) {
+    loop {
+        let call = match run.session.advance() {
+            Ok(Step::Call(call)) => call,
+            Ok(Step::Finished(generated)) => {
+                finish(id, run, Ok(generated), finished);
+                return;
+            }
+            Err(error) => {
+                finish(id, run, Err(error), finished);
+                return;
+            }
+            Ok(Step::Waiting) => unreachable!("only contextual generators suspend a roll"),
+        };
+        match registry.generator(&call) {
+            Ok(Generator::Pure(generator)) => {
+                if let Err(error) = run.session.resume(invoke(&generator, call)) {
+                    finish(id, run, Err(error), finished);
+                    return;
+                }
+            }
+            Ok(Generator::Contextual) => {
+                run.waiting = call.index;
+                native.write(NativeCall {
+                    token: Token {
+                        roll: id,
+                        index: call.index,
+                    },
+                    call,
+                });
+                runtime.runs.insert(id, run);
+                return;
+            }
+            Err(error) => {
+                finish(id, run, Err(error), finished);
+                return;
+            }
+        }
+    }
+}
+
+fn finish(
+    id: RollId,
+    run: Run,
+    result: Result<Vec<Value>, LootError>,
+    finished: &mut MessageWriter<NativeFinished>,
+) {
+    finished.write(NativeFinished {
+        output_type: run.output_type,
+        finished: LootFinished {
+            id,
+            owner: run.owner,
+            #[cfg(test)]
+            trace: run.session.trace().to_vec(),
+            result,
+        },
+    });
+}
+
+fn invoke(generator: &Arc<PureGenerator>, mut call: FunctionCall) -> Result<Vec<Value>, String> {
+    let mut context = LootFunctionContext::new(&call);
+    let generated = generator(&mut context, &mut call.arguments)?;
+    call.arguments.finish()?;
+    Ok(generated)
 }

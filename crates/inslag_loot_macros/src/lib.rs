@@ -6,64 +6,12 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Expr, Fields, LitStr, Type, parse_macro_input, parse_quote};
 
-fn crate_path() -> proc_macro2::TokenStream {
-    let root = match proc_macro_crate::crate_name("inslag_loot") {
-        Ok(proc_macro_crate::FoundCrate::Itself) => quote!(::inslag_loot),
-        Ok(proc_macro_crate::FoundCrate::Name(name)) => {
-            let ident = syn::Ident::new(&name, proc_macro2::Span::call_site());
-            quote!(::#ident)
-        }
-        Err(_) => quote!(::inslag_loot),
-    };
-    quote!(#root::__private)
-}
-
 #[derive(Default)]
 struct Attributes {
     primary: bool,
     default: Option<Expr>,
     rename: Option<LitStr>,
     reference: Option<LitStr>,
-}
-
-fn attributes(attrs: &[syn::Attribute]) -> syn::Result<Attributes> {
-    let mut result = Attributes::default();
-    for attr in attrs.iter().filter(|attr| attr.path().is_ident("loot")) {
-        attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("primary") && !result.primary {
-                result.primary = true;
-            } else if meta.path.is_ident("default") && result.default.is_none() {
-                result.default = Some(if meta.input.peek(syn::Token![=]) {
-                    meta.value()?.parse()?
-                } else {
-                    parse_quote!(::core::default::Default::default())
-                });
-            } else if meta.path.is_ident("rename") && result.rename.is_none() {
-                result.rename = Some(meta.value()?.parse()?);
-            } else if meta.path.is_ident("reference") && result.reference.is_none() {
-                result.reference = Some(meta.value()?.parse()?);
-            } else {
-                return Err(meta.error("unknown or duplicate loot attribute"));
-            }
-            Ok(())
-        })?;
-    }
-    Ok(result)
-}
-
-fn option_inner(ty: &Type) -> Option<&Type> {
-    let Type::Path(path) = ty else { return None };
-    let segment = path.path.segments.last()?;
-    if segment.ident != "Option" {
-        return None;
-    }
-    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
-        return None;
-    };
-    match args.args.first()? {
-        syn::GenericArgument::Type(ty) => Some(ty),
-        _ => None,
-    }
 }
 
 /// Exposes struct fields as named loot arguments.
@@ -325,25 +273,6 @@ fn output_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     })
 }
 
-fn atom_output(
-    root: &proc_macro2::TokenStream,
-    name: &syn::Ident,
-    generics: &syn::Generics,
-) -> proc_macro2::TokenStream {
-    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
-    quote! {
-        impl #impl_generics #root::LootReturn for #name #ty_generics #where_clause {
-            fn output_type() -> Option<#root::ValueType> { Some(<Self as #root::LootValue>::value_type()) }
-            fn into_values(self) -> Result<Vec<#root::Value>, String> { Ok(vec![<Self as #root::LootValue>::into_value(self)]) }
-        }
-        impl #impl_generics #root::LootOutput for #name #ty_generics #where_clause {
-            fn accepts_type(value_type: &#root::ValueType) -> bool { <Self as #root::LootValue>::value_type().contains(value_type) }
-            fn accepts_value(value: &#root::Value) -> bool { <Self as #root::LootValue>::value_type().accepts(value) }
-            fn from_value(value: #root::Value) -> Result<Self, String> { <Self as #root::FromLootValue>::from_loot_value(value) }
-        }
-    }
-}
-
 /// Maps a fieldless enum to strings usable in loot sources.
 ///
 /// Variant names become lowercase with underscores before subsequent uppercase
@@ -425,6 +354,77 @@ fn value_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         }
         #output
     })
+}
+
+fn crate_path() -> proc_macro2::TokenStream {
+    let root = match proc_macro_crate::crate_name("inslag_loot") {
+        Ok(proc_macro_crate::FoundCrate::Itself) => quote!(::inslag_loot),
+        Ok(proc_macro_crate::FoundCrate::Name(name)) => {
+            let ident = syn::Ident::new(&name, proc_macro2::Span::call_site());
+            quote!(::#ident)
+        }
+        Err(_) => quote!(::inslag_loot),
+    };
+    quote!(#root::__private)
+}
+
+fn option_inner(ty: &Type) -> Option<&Type> {
+    let Type::Path(path) = ty else { return None };
+    let segment = path.path.segments.last()?;
+    if segment.ident != "Option" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    match args.args.first()? {
+        syn::GenericArgument::Type(ty) => Some(ty),
+        _ => None,
+    }
+}
+
+fn attributes(attrs: &[syn::Attribute]) -> syn::Result<Attributes> {
+    let mut result = Attributes::default();
+    for attr in attrs.iter().filter(|attr| attr.path().is_ident("loot")) {
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("primary") && !result.primary {
+                result.primary = true;
+            } else if meta.path.is_ident("default") && result.default.is_none() {
+                result.default = Some(if meta.input.peek(syn::Token![=]) {
+                    meta.value()?.parse()?
+                } else {
+                    parse_quote!(::core::default::Default::default())
+                });
+            } else if meta.path.is_ident("rename") && result.rename.is_none() {
+                result.rename = Some(meta.value()?.parse()?);
+            } else if meta.path.is_ident("reference") && result.reference.is_none() {
+                result.reference = Some(meta.value()?.parse()?);
+            } else {
+                return Err(meta.error("unknown or duplicate loot attribute"));
+            }
+            Ok(())
+        })?;
+    }
+    Ok(result)
+}
+
+fn atom_output(
+    root: &proc_macro2::TokenStream,
+    name: &syn::Ident,
+    generics: &syn::Generics,
+) -> proc_macro2::TokenStream {
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+    quote! {
+        impl #impl_generics #root::LootReturn for #name #ty_generics #where_clause {
+            fn output_type() -> Option<#root::ValueType> { Some(<Self as #root::LootValue>::value_type()) }
+            fn into_values(self) -> Result<Vec<#root::Value>, String> { Ok(vec![<Self as #root::LootValue>::into_value(self)]) }
+        }
+        impl #impl_generics #root::LootOutput for #name #ty_generics #where_clause {
+            fn accepts_type(value_type: &#root::ValueType) -> bool { <Self as #root::LootValue>::value_type().contains(value_type) }
+            fn accepts_value(value: &#root::Value) -> bool { <Self as #root::LootValue>::value_type().accepts(value) }
+            fn from_value(value: #root::Value) -> Result<Self, String> { <Self as #root::FromLootValue>::from_loot_value(value) }
+        }
+    }
 }
 
 #[cfg(test)]

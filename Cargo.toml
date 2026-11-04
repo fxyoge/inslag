@@ -35,4 +35,5 @@ all = "warn"
 libraries = [
     { git = "https://github.com/trailofbits/dylint", tag = "v6.3.2", pattern = "examples/general/basic_dead_store" },
     { git = "https://github.com/trailofbits/dylint", tag = "v6.3.2", pattern = "examples/general/crate_wide_allow" },
+    { git = "https://github.com/trailofbits/dylint", tag = "v6.3.2", pattern = "examples/restriction/non_topologically_sorted_functions" },
 ]

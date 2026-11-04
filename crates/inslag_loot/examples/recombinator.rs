@@ -104,6 +104,16 @@ struct Recombine {
     seed: u64,
 }
 
+fn setup(mut commands: Commands) {
+    let left = spawn_donor(&mut commands, "leather_tunic", 1);
+    let right = spawn_donor(&mut commands, "plate_vest", 2);
+    commands.spawn(Recombine {
+        left,
+        right,
+        seed: 13,
+    });
+}
+
 fn spawn_donor(commands: &mut Commands, definition: &str, suffix: i64) -> Entity {
     commands
         .spawn((
@@ -126,16 +136,6 @@ fn spawn_donor(commands: &mut Commands, definition: &str, suffix: i64) -> Entity
             ),
         ))
         .id()
-}
-
-fn setup(mut commands: Commands) {
-    let left = spawn_donor(&mut commands, "leather_tunic", 1);
-    let right = spawn_donor(&mut commands, "plate_vest", 2);
-    commands.spawn(Recombine {
-        left,
-        right,
-        seed: 13,
-    });
 }
 
 fn request_recombination(
@@ -186,6 +186,13 @@ fn spawn_recombined_item(
     }
 }
 
+fn main() -> AppExit {
+    app()
+        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_millis(1)))
+        .add_systems(Startup, setup)
+        .run()
+}
+
 fn app() -> App {
     let mut app = App::new();
     app.add_plugins((
@@ -201,11 +208,4 @@ fn app() -> App {
     .add_loot_output::<RecombinationPart>()
     .add_systems(Update, (request_recombination, spawn_recombined_item));
     app
-}
-
-fn main() -> AppExit {
-    app()
-        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_millis(1)))
-        .add_systems(Startup, setup)
-        .run()
 }
