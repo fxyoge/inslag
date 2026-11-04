@@ -30,3 +30,9 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = "warn"
+
+[workspace.metadata.dylint]
+libraries = [
+    { git = "https://github.com/trailofbits/dylint", tag = "v6.3.2", pattern = "examples/general/basic_dead_store" },
+    { git = "https://github.com/trailofbits/dylint", tag = "v6.3.2", pattern = "examples/general/crate_wide_allow" },
+]

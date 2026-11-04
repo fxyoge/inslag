@@ -13,6 +13,7 @@ docs: _watch-docs
 lint:
     cargo fmt --all --check
     cargo clippy --locked --all-targets -- -D warnings
+    cargo dylint --all --fail-on-no-libraries -- --workspace --all-targets --locked --config 'build.rustflags=["-Dwarnings","-Zalways-encode-mir"]'
 
 test: \
   _test-workspace
