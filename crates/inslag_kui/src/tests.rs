@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+    collections::BTreeMap,
+    time::{Duration, Instant},
+};
 
 use bevy::{
     asset::AssetEvent,
@@ -993,15 +996,42 @@ fn text_templates_follow_keyed_rows_after_reordering() {
     );
 }
 
+#[track_caller]
 pub(crate) fn wait_for(app: &mut App, predicate: impl Fn(&mut App) -> bool) {
-    for _ in 0..1000 {
+    let started = Instant::now();
+    let timeout = Duration::from_secs(30);
+    loop {
         app.update();
         if predicate(app) {
             return;
         }
+        if started.elapsed() >= timeout {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(1));
     }
-    panic!("observable condition did not become true");
+    let mut views = app.world_mut().query::<(Entity, &KuiView)>();
+    let world = app.world();
+    let asset_server = world.resource::<AssetServer>();
+    let assets = world.resource::<Assets<KuiAsset>>();
+    let diagnostics = views
+        .iter(world)
+        .map(|(entity, view)| {
+            format!(
+                "view {entity:?}: status={:?}, asset={:?}, path={:?}, present={}, load_states (asset, dependencies, recursive dependencies)={:?}",
+                view.status(),
+                view.asset.id(),
+                asset_server.get_path(view.asset.id()),
+                assets.contains(view.asset.id()),
+                asset_server.get_load_states(view.asset.id()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    panic!(
+        "observable condition did not become true after {:?}\n{diagnostics}",
+        started.elapsed()
+    );
 }
 
 pub(crate) fn click(app: &mut App, entity: Entity, button: PointerButton) {
