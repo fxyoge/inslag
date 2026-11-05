@@ -428,7 +428,7 @@ impl Runner {
     }
 
     fn execute(&mut self, path: &str, interrupts: &Cell<u64>) -> Result<(), String> {
-        let root = self.suite.root.join("e2e").canonicalize().map_err(err)?;
+        let root = self.suite.root.join("e2e");
         let module = load_module(&self.lua, &root, &root.join("cases").join(path)).map_err(err)?;
         let module: Table = module
             .as_table()
@@ -674,8 +674,9 @@ impl Runner {
 }
 
 fn load_module(lua: &Lua, root: &Path, path: &Path) -> mlua::Result<Value> {
+    let root = root.canonicalize().map_err(mlua::Error::external)?;
     let path = path.canonicalize().map_err(mlua::Error::external)?;
-    if !path.starts_with(root) || path.extension().is_none_or(|e| e != "luau") {
+    if !path.starts_with(&root) || path.extension().is_none_or(|e| e != "luau") {
         return Err(mlua::Error::runtime(
             "require must resolve to a .luau module beneath e2e/",
         ));
@@ -692,7 +693,6 @@ fn load_module(lua: &Lua, root: &Path, path: &Path) -> mlua::Result<Value> {
         value => return Ok(value),
     }
     cache.set(key, false)?;
-    let root: PathBuf = root.to_owned();
     let parent = path.parent().unwrap().to_owned();
     let environment = lua.create_table()?;
     let metatable = lua.create_table()?;
@@ -1027,6 +1027,36 @@ mod tests {
         );
         assert!(
             load_module(&lua, &root, &root.join("../outside.luau"))
+                .unwrap_err()
+                .to_string()
+                .contains("beneath e2e")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn modules_accept_symlinked_roots_but_reject_symlink_escapes() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("e2e");
+        let alias = directory.path().join("alias");
+        let outside = directory.path().join("outside.luau");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("a.luau"), "return {}").unwrap();
+        std::fs::write(root.join("b.luau"), "return require('./a')").unwrap();
+        std::fs::write(&outside, "return {}").unwrap();
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("escape.luau")).unwrap();
+        let lua = Lua::new();
+        lua.set_named_registry_value("e2e_modules", lua.create_table().unwrap())
+            .unwrap();
+        let a = load_module(&lua, &root, &root.join("a.luau")).unwrap();
+        let b = load_module(&lua, &alias, &alias.join("b.luau")).unwrap();
+        assert_eq!(
+            a.as_table().unwrap().to_pointer(),
+            b.as_table().unwrap().to_pointer()
+        );
+        assert!(
+            load_module(&lua, &alias, &alias.join("escape.luau"))
                 .unwrap_err()
                 .to_string()
                 .contains("beneath e2e")
