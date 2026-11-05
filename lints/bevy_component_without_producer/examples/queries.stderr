@@ -1,0 +1,125 @@
+warning: component `Missing` is queried, but no producer was found in this crate
+  --> $DIR/queries.rs:6:1
+   |
+LL | struct Missing;
+   | ^^^^^^^^^^^^^^
+   |
+note: this query requires the component and may never match
+  --> $DIR/queries.rs:31:39
+   |
+LL | fn required(query: Query<Entity, With<Missing>>) {
+   |                                       ^^^^^^^
+note: this query has optional or alternative access to a component with no known producer
+  --> $DIR/queries.rs:53:68
+   |
+LL | fn alternative(query: Query<Entity, Or<(With<Alternative>, Without<Missing>)>>) {
+   |                                                                    ^^^^^^^
+   = note: this analysis applies to the current build configuration
+   = help: check for missing initialization or obsolete consumers; removing a query constraint can enable previously disabled behavior
+   = note: `#[warn(bevy_component_without_producer)]` on by default
+
+warning: component `UnusedDefault` is queried, but no producer was found in this crate
+  --> $DIR/queries.rs:9:1
+   |
+LL | struct UnusedDefault;
+   | ^^^^^^^^^^^^^^^^^^^^
+   |
+note: this query requires the component and may never match
+  --> $DIR/queries.rs:35:44
+   |
+LL | fn default_is_not_a_producer(query: Query<&UnusedDefault>) {
+   |                                            ^^^^^^^^^^^^^
+   = note: this analysis applies to the current build configuration
+   = help: check for missing initialization or obsolete consumers; removing a query constraint can enable previously disabled behavior
+
+warning: component `Excluded` is queried, but no producer was found in this crate
+  --> $DIR/queries.rs:12:1
+   |
+LL | struct Excluded;
+   | ^^^^^^^^^^^^^^^
+   |
+note: this query excludes a component with no known producer
+  --> $DIR/queries.rs:39:42
+   |
+LL | fn excluded(query: Query<Entity, Without<Excluded>>) {
+   |                                          ^^^^^^^^
+   = note: this analysis applies to the current build configuration
+   = help: check for missing initialization or obsolete consumers; removing a query constraint can enable previously disabled behavior
+
+warning: component `Optional` is queried, but no producer was found in this crate
+  --> $DIR/queries.rs:15:1
+   |
+LL | struct Optional;
+   | ^^^^^^^^^^^^^^^
+   |
+note: this query has optional or alternative access to a component with no known producer
+  --> $DIR/queries.rs:43:43
+   |
+LL | fn optional(query: Query<(Entity, Option<&Optional>)>) {
+   |                                           ^^^^^^^^
+   = note: this analysis applies to the current build configuration
+   = help: check for missing initialization or obsolete consumers; removing a query constraint can enable previously disabled behavior
+
+warning: component `Mutable` is queried, but no producer was found in this crate
+  --> $DIR/queries.rs:18:1
+   |
+LL | struct Mutable {
+   | ^^^^^^^^^^^^^^
+   |
+note: this query requires the component and may never match
+  --> $DIR/queries.rs:47:34
+   |
+LL | fn mutable(mut query: Query<&mut Mutable>) {
+   |                                  ^^^^^^^
+   = note: this analysis applies to the current build configuration
+   = help: check for missing initialization or obsolete consumers; removing a query constraint can enable previously disabled behavior
+
+warning: component `Alternative` is queried, but no producer was found in this crate
+  --> $DIR/queries.rs:23:1
+   |
+LL | struct Alternative;
+   | ^^^^^^^^^^^^^^^^^^
+   |
+note: this query has optional or alternative access to a component with no known producer
+  --> $DIR/queries.rs:53:46
+   |
+LL | fn alternative(query: Query<Entity, Or<(With<Alternative>, Without<Missing>)>>) {
+   |                                              ^^^^^^^^^^^
+   = note: this analysis applies to the current build configuration
+   = help: check for missing initialization or obsolete consumers; removing a query constraint can enable previously disabled behavior
+
+warning: component `Tracked` is queried, but no producer was found in this crate
+  --> $DIR/queries.rs:26:1
+   |
+LL | struct Tracked;
+   | ^^^^^^^^^^^^^^
+   |
+note: this query requires the component and may never match
+  --> $DIR/queries.rs:57:40
+   |
+LL | fn tracked(query: Query<Entity, (Added<Tracked>, Changed<Tracked>)>) {
+   |                                        ^^^^^^^
+note: this query requires the component and may never match
+  --> $DIR/queries.rs:57:58
+   |
+LL | fn tracked(query: Query<Entity, (Added<Tracked>, Changed<Tracked>)>) {
+   |                                                          ^^^^^^^
+   = note: this analysis applies to the current build configuration
+   = help: check for missing initialization or obsolete consumers; removing a query constraint can enable previously disabled behavior
+
+warning: component `Checked` is queried, but no producer was found in this crate
+  --> $DIR/queries.rs:29:1
+   |
+LL | struct Checked;
+   | ^^^^^^^^^^^^^^
+   |
+note: this query has optional or alternative access to a component with no known producer
+  --> $DIR/queries.rs:61:29
+   |
+LL | fn checked(query: Query<Has<Checked>>) {
+   |                             ^^^^^^^
+   = note: this analysis applies to the current build configuration
+   = help: check for missing initialization or obsolete consumers; removing a query constraint can enable previously disabled behavior
+
+warning: 8 warnings emitted
+

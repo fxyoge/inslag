@@ -1,0 +1,17 @@
+warning: component `ConsumerOnly` is queried, but no producer was found in this crate
+  --> $DIR/macros.rs:8:1
+   |
+LL | struct ConsumerOnly;
+   | ^^^^^^^^^^^^^^^^^^^
+   |
+note: this query requires the component and may never match
+  --> $DIR/macros.rs:23:11
+   |
+LL | consumer!(ConsumerOnly);
+   |           ^^^^^^^^^^^^
+   = note: this analysis applies to the current build configuration
+   = help: check for missing initialization or obsolete consumers; removing a query constraint can enable previously disabled behavior
+   = note: `#[warn(bevy_component_without_producer)]` on by default
+
+warning: 1 warning emitted
+
