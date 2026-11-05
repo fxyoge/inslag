@@ -42,6 +42,7 @@ fn entry_spans(input: &str, entries: &[Entry]) {
                 entries,
                 rolls,
                 distinct,
+                exclude,
             } => {
                 entry_spans(input, entries);
                 if let Some(rolls) = rolls {
@@ -49,6 +50,9 @@ fn entry_spans(input: &str, entries: &[Entry]) {
                 }
                 if let Some(distinct) = distinct {
                     valid_span(input, &distinct.span);
+                }
+                if let Some(exclude) = exclude {
+                    valid_span(input, &exclude.span);
                 }
             }
             EntryKind::Call {

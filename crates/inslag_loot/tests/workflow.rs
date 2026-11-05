@@ -230,9 +230,14 @@ table "changes"
   choose when="document.quality > 0"
     #qualities document=$document
 table "qualities" using=document.set-quality target=$document
-  choose
-    1 when="document.quality ~= 1"
-    2 when="document.quality ~= 2"
+  choose exclude="document.quality"
+    1
+    2
+table "exclusions" using=document.set-quality target=$document
+  choose exclude="{document.quality, nil, 3}"
+    1
+    2
+    3 weight=999
 table "failed"
   #changes document=$document
   nothing when="document.quality.invalid"
@@ -297,6 +302,17 @@ table "suspended"
     );
     assert_eq!(app.world().get::<Quality>(first).unwrap().0, 1.);
     assert_eq!(app.world().get::<Quality>(second).unwrap().0, 2.);
+    assert_eq!(
+        roll(&mut app, request("exclusions", first)).result.unwrap()[0].value,
+        2.
+    );
+    assert_eq!(
+        roll(&mut app, request("exclusions", second))
+            .result
+            .unwrap()[0]
+            .value,
+        1.
+    );
     let suspended = roll(&mut app, request("suspended", first)).result.unwrap();
     assert_eq!(suspended.len(), 2);
     assert_eq!(suspended[0].value, 3.);

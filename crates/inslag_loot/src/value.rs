@@ -183,13 +183,13 @@ impl Value {
             ),
             Self::Reference(_) => {
                 return Err(
-                    "references are opaque in when expressions; pass the required values as inputs"
+                    "references are opaque in Luau expressions; pass the required values as inputs"
                         .into(),
                 );
             }
             Self::Data(_) => {
                 return Err(
-                    "Rust data is opaque in when expressions; pass the required values as inputs"
+                    "Rust data is opaque in Luau expressions; pass the required values as inputs"
                         .into(),
                 );
             }

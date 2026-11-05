@@ -1,5 +1,5 @@
 use crate::error::SourceMap;
-use crate::program::{Entry, EntryKind, Expression, Guard, Table};
+use crate::program::{ContextExpression, Entry, EntryKind, Expression, Table};
 use crate::{FunctionSignature, FunctionSignatures, LootError, LootOutput, Value, ValueType};
 use inslag_format_loot as syntax;
 use inslag_luau::EnvironmentSpec;
@@ -327,27 +327,7 @@ fn lower_entries(
         let weight = lower_count(entry.weight, "weight", source)?;
         let condition = entry
             .condition
-            .map(|condition| {
-                let location = source.location(condition.span.start);
-                let expression = guard_environment()
-                    .compile(&condition.value, true)
-                    .map_err(|error| {
-                        LootError::new(
-                            location.clone(),
-                            format!("invalid when expression: {error}"),
-                        )
-                    })?;
-                Ok(Guard {
-                    inputs: expression
-                        .dependencies
-                        .iter()
-                        .filter(|name| !guard_environment().is_builtin(name))
-                        .cloned()
-                        .collect(),
-                    expression: Arc::new(expression),
-                    location,
-                })
-            })
+            .map(|condition| lower_context_expression(condition, "when", source))
             .transpose()?;
         let kind = match entry.kind {
             syntax::EntryKind::Nothing => EntryKind::Nothing,
@@ -358,11 +338,36 @@ fn lower_entries(
                 entries,
                 rolls,
                 distinct,
-            } => EntryKind::Choose {
-                entries: lower_entries(entries, using, defaults, functions, source)?.into(),
-                rolls: lower_count(rolls, "rolls", source)?,
-                distinct: distinct.is_some_and(|distinct| distinct.value),
-            },
+                exclude,
+            } => {
+                let entries = lower_entries(entries, using, defaults, functions, source)?;
+                let exclude = exclude
+                    .map(|exclude| lower_context_expression(exclude, "exclude", source))
+                    .transpose()?;
+                if exclude.is_some() {
+                    for child in &entries {
+                        if !matches!(
+                            child.selection_value(functions),
+                            Some(
+                                Expression::Literal(_)
+                                    | Expression::Variable(_)
+                                    | Expression::Not(_)
+                            )
+                        ) {
+                            return Err(LootError::new(
+                                child.location.clone(),
+                                "choose exclude requires scalar candidates or function primary arguments; ranges and groups are not supported",
+                            ));
+                        }
+                    }
+                }
+                EntryKind::Choose {
+                    entries: entries.into(),
+                    rolls: lower_count(rolls, "rolls", source)?,
+                    distinct: distinct.is_some_and(|distinct| distinct.value),
+                    exclude,
+                }
+            }
             syntax::EntryKind::Call {
                 function,
                 arguments,
@@ -476,7 +481,58 @@ fn lower_count(
     Ok(expression)
 }
 
-fn guard_environment() -> &'static EnvironmentSpec {
+fn lower_context_expression(
+    value: syntax::Spanned<String>,
+    attribute: &'static str,
+    source: &SourceMap<'_>,
+) -> Result<ContextExpression, LootError> {
+    let location = source.location(value.span.start);
+    let text = if attribute == "exclude" {
+        // Normalize before crossing the Luau boundary, which rejects sparse tables
+        // and borrowed views even when their individual exclusions are valid.
+        format!(
+            "(function(value)
+                if type(value) ~= 'table' then return value end
+                local result = {{}}
+                for key, item in value do
+                    if type(key) ~= 'number' or key < 1 or key % 1 ~= 0 then
+                        error('exclude requires positive integer keys')
+                    end
+                    local kind = type(item)
+                    if kind ~= 'nil' and kind ~= 'boolean' and kind ~= 'number' and kind ~= 'string' then
+                        error('exclude requires scalar elements')
+                    end
+                    if item ~= nil then result[#result + 1] = item end
+                end
+                return result
+            end)(({}))",
+            value.value
+        )
+    } else {
+        value.value
+    };
+    let expression = context_environment()
+        .compile(&text, attribute == "when")
+        .map_err(|error| {
+            LootError::new(
+                location.clone(),
+                format!("invalid {attribute} expression: {error}"),
+            )
+        })?;
+    Ok(ContextExpression {
+        inputs: expression
+            .dependencies
+            .iter()
+            .filter(|name| !context_environment().is_builtin(name))
+            .cloned()
+            .collect(),
+        expression: Arc::new(expression),
+        location,
+        attribute,
+    })
+}
+
+fn context_environment() -> &'static EnvironmentSpec {
     static ENVIRONMENT: OnceLock<EnvironmentSpec> = OnceLock::new();
     ENVIRONMENT.get_or_init(|| {
         EnvironmentSpec::builder()
@@ -492,7 +548,7 @@ fn guard_environment() -> &'static EnvironmentSpec {
             .map()
             .read_only(true)
             .build()
-            .expect("valid loot guard environment")
+            .expect("valid loot expression environment")
     })
 }
 
@@ -602,7 +658,13 @@ fn infer_inputs(
             .condition
             .iter()
             .flat_map(|guard| guard.inputs.iter().map(String::as_str));
-        for name in variables.chain(guard_variables) {
+        let exclusion_variables = match &entry.kind {
+            EntryKind::Choose { exclude, .. } => exclude.as_ref(),
+            _ => None,
+        }
+        .into_iter()
+        .flat_map(|exclude| exclude.inputs.iter().map(String::as_str));
+        for name in variables.chain(guard_variables).chain(exclusion_variables) {
             if !locals.contains(name) {
                 if declarations.contains(name) {
                     return Err(LootError::new(

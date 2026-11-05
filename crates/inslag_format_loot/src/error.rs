@@ -104,8 +104,8 @@ pub enum ErrorKind {
     /// A `weight` attribute is not on a direct child of `choose`.
     #[error("weight is only allowed on direct children of choose")]
     WeightOutsideChoose,
-    /// A `rolls` or `distinct` attribute occurs on an entry other than `choose`.
-    #[error("rolls and distinct are only allowed on choose")]
+    /// Choice controls cannot apply to other entry kinds.
+    #[error("rolls, distinct, and exclude are only allowed on choose")]
     ChooseAttributeOutsideChoose,
     /// A `distinct` value is not the unquoted keyword `true` or `false`.
     #[error("distinct requires true or false")]

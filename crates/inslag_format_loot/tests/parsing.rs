@@ -80,6 +80,47 @@ fn guards_preserve_decoded_luau_and_source_spans_without_compiling() {
 }
 
 #[test]
+fn exclusions_preserve_luau_source_and_spans_without_compiling() {
+    for expression in [
+        "document.color",
+        "{document.color or 'ivory', 'gray'}",
+        "function( broken",
+        "nil",
+    ] {
+        let source = format!("table \"root\"\n  choose exclude=\"{expression}\"\n    ivory\n");
+        let document = parse(&source).unwrap();
+        let EntryKind::Choose {
+            exclude: Some(exclude),
+            ..
+        } = &document.tables[0].entries[0].kind
+        else {
+            panic!()
+        };
+        assert_eq!(exclude.value, expression);
+        assert_eq!(&source[exclude.span.clone()], format!("\"{expression}\""));
+    }
+    let document = parse("table \"root\"\n  choose exclude=false\n    true\n").unwrap();
+    assert!(
+        matches!(&document.tables[0].entries[0].kind, EntryKind::Choose { exclude: Some(value), .. } if value.value == "false")
+    );
+}
+
+#[test]
+fn exclusions_are_choose_only_and_cannot_be_duplicated() {
+    for entry in ["1", "all", "nothing", "@actor", "#other"] {
+        let source = format!("table \"root\"\n  {entry} exclude=\"current\"\n");
+        let error = parse(&source).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::ChooseAttributeOutsideChoose);
+        assert_eq!(&source[error.span], "exclude");
+    }
+    let error = parse("table \"root\"\n  choose exclude=1 exclude=2\n    1\n").unwrap_err();
+    assert_eq!(error.kind, ErrorKind::DuplicateAttribute("exclude".into()));
+    assert!(
+        matches!(parse("table \"root\" using=actor exclude=1\n").unwrap_err().kind, ErrorKind::ReservedAttribute(name) if name == "exclude")
+    );
+}
+
+#[test]
 fn comments_blank_lines_line_endings_and_final_newlines_do_not_change_structure() {
     for input in [
         "table \"root\"\n  1\n",
@@ -103,15 +144,19 @@ fn omission_is_distinct_from_an_explicit_default() {
         entries: children,
         rolls,
         distinct,
+        exclude,
     } = &entries[0].kind
     else {
         panic!()
     };
-    assert!(rolls.is_none() && distinct.is_none() && children[0].weight.is_none());
+    assert!(
+        rolls.is_none() && distinct.is_none() && exclude.is_none() && children[0].weight.is_none()
+    );
     let EntryKind::Choose {
         entries: children,
         rolls,
         distinct,
+        ..
     } = &entries[1].kind
     else {
         panic!()
@@ -205,6 +250,7 @@ fn grammar_vocabulary_is_available_without_a_runtime() {
     }
     for name in [
         "table", "choose", "all", "nothing", "using", "as", "weight", "when", "rolls", "distinct",
+        "exclude",
     ] {
         assert!(is_reserved(name));
     }

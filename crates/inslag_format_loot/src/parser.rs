@@ -198,6 +198,7 @@ pub fn is_reserved(name: &str) -> bool {
             | "when"
             | "rolls"
             | "distinct"
+            | "exclude"
     )
 }
 
@@ -240,6 +241,18 @@ fn expression(token: Token<'_>) -> Result<Expression, ParseError> {
             return Err(fail(ErrorKind::InvalidValue));
         }
         ExpressionKind::Literal(Literal::String(text.into()))
+    };
+    Ok(Spanned {
+        value,
+        span: token.span,
+    })
+}
+
+fn context_expression(token: Token<'_>) -> Result<Spanned<String>, ParseError> {
+    let value = if token.text.starts_with(['\'', '"']) {
+        unquote(&token)?
+    } else {
+        token.text.to_owned()
     };
     Ok(Spanned {
         value,
@@ -434,18 +447,7 @@ impl DocumentParser<'_> {
             })
             .transpose()?;
         let condition = remove(&mut attrs, "when")
-            .map(|attribute| {
-                let token = attribute.value;
-                let value = if token.text.starts_with(['\'', '"']) {
-                    unquote(&token)?
-                } else {
-                    token.text.to_owned()
-                };
-                Ok(Spanned {
-                    value,
-                    span: token.span,
-                })
-            })
+            .map(|attribute| context_expression(attribute.value))
             .transpose()?;
         let weight = remove(&mut attrs, "weight")
             .map(|attribute| {
@@ -460,9 +462,10 @@ impl DocumentParser<'_> {
             .transpose()?;
         let rolls = remove(&mut attrs, "rolls");
         let distinct = remove(&mut attrs, "distinct");
+        let exclude = remove(&mut attrs, "exclude");
         let children = self.children(line.indent, depth + 1, first.text == "choose")?;
         if first.text != "choose"
-            && let Some(attribute) = rolls.as_ref().or(distinct.as_ref())
+            && let Some(attribute) = rolls.as_ref().or(distinct.as_ref()).or(exclude.as_ref())
         {
             return Err(ParseError::new(
                 ErrorKind::ChooseAttributeOutsideChoose,
@@ -517,6 +520,9 @@ impl DocumentParser<'_> {
                         entries: children,
                         rolls,
                         distinct,
+                        exclude: exclude
+                            .map(|attribute| context_expression(attribute.value))
+                            .transpose()?,
                     }
                 }
             }

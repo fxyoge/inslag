@@ -60,6 +60,8 @@ pub enum EntryKind {
         rolls: Option<Expression>,
         /// Authored distinctness flag; omission is distinct from `distinct=false`.
         distinct: Option<Spanned<bool>>,
+        /// Kept as source so consumers can compile value-producing exclusions.
+        exclude: Option<Spanned<String>>,
     },
     /// An explicit `@function` call, whether or not the function exists.
     Call {

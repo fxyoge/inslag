@@ -1,4 +1,4 @@
-use crate::program::{Entry, EntryKind, Expression};
+use crate::program::{ContextExpression, Entry, EntryKind, Expression};
 use crate::{Arguments, Catalog, LootError, SourceLocation, Value, ValueType};
 use inslag_luau::{LuauValue, ReadOnlyContext, ReadOnlyValue};
 use std::{collections::BTreeMap, sync::Arc};
@@ -272,6 +272,7 @@ impl Session {
                     entries,
                     rolls,
                     distinct,
+                    exclude,
                 } => {
                     let count = integer(
                         evaluate(rolls, locals, &mut self.random, &entry.location)?,
@@ -281,9 +282,42 @@ impl Session {
                     if count > self.limits.max_steps as u64 {
                         return Err(self.error(&entry.location, "roll count exceeds step limit"));
                     }
+                    let exclusions = exclude
+                        .as_ref()
+                        .map(|expression| evaluate_exclusions(expression, locals, reader))
+                        .transpose()?;
                     let mut candidates = Vec::new();
                     for (index, child) in entries.iter().enumerate() {
                         if condition(child, locals, reader)? {
+                            if let Some(exclusions) = &exclusions {
+                                let value = evaluate(
+                                    child
+                                        .selection_value(&self.catalog.functions)
+                                        .expect("exclusion candidates validated"),
+                                    locals,
+                                    &mut self.random,
+                                    &child.location,
+                                )?;
+                                if !matches!(
+                                    value,
+                                    Value::Nil
+                                        | Value::Boolean(_)
+                                        | Value::Integer(_)
+                                        | Value::Number(_)
+                                        | Value::String(_)
+                                ) {
+                                    return Err(self.error(
+                                        &child.location,
+                                        "choose exclude requires scalar candidate values",
+                                    ));
+                                }
+                                if exclusions
+                                    .iter()
+                                    .any(|excluded_value| excluded(&value, excluded_value))
+                                {
+                                    continue;
+                                }
+                            }
                             let weight = integer(
                                 evaluate(&child.weight, locals, &mut self.random, &child.location)?,
                                 "weight",
@@ -448,47 +482,100 @@ fn condition(
 ) -> Result<bool, LootError> {
     match &entry.condition {
         None => Ok(true),
-        Some(guard) => {
-            if let Some(reader) = reader {
-                return match guard
-                    .expression
-                    .evaluate_context(&GuardContext { locals, reader })
-                    .map_err(|error| {
-                        LootError::new(
-                            guard.location.clone(),
-                            format!("when expression failed: {error}"),
-                        )
-                    })? {
-                    LuauValue::Boolean(value) => Ok(value),
-                    _ => unreachable!("guards compile with boolean coercion"),
-                };
-            }
-            let inputs = guard
-                .inputs
-                .iter()
-                .filter_map(|name| locals.get(name).map(|value| (name, value)))
-                .map(|(name, value)| value.to_luau().map(|value| (name.clone(), value)))
-                .collect::<Result<BTreeMap<_, _>, _>>()
-                .map_err(|error| LootError::new(guard.location.clone(), error))?;
-            match guard.expression.evaluate(&inputs).map_err(|error| {
-                LootError::new(
-                    guard.location.clone(),
-                    format!("when expression failed: {error}"),
-                )
-            })? {
-                inslag_luau::LuauValue::Boolean(value) => Ok(value),
-                _ => unreachable!("guard expressions compile with Luau truthiness"),
-            }
-        }
+        Some(guard) => match evaluate_context_expression(guard, locals, reader)? {
+            LuauValue::Boolean(value) => Ok(value),
+            _ => unreachable!("guard expressions compile with Luau truthiness"),
+        },
     }
 }
 
-struct GuardContext<'a> {
-    locals: &'a BTreeMap<String, Value>,
-    reader: &'a ReferenceReader<'a>,
+fn evaluate_exclusions(
+    expression: &ContextExpression,
+    locals: &BTreeMap<String, Value>,
+    reader: Option<&ReferenceReader<'_>>,
+) -> Result<Vec<LuauValue>, LootError> {
+    let values = match evaluate_context_expression(expression, locals, reader)? {
+        LuauValue::Nil => Vec::new(),
+        LuauValue::Sequence(values) => values,
+        value => vec![value],
+    };
+    if values.iter().any(|value| match value {
+        LuauValue::Number(number) => !number.is_finite(),
+        LuauValue::Nil | LuauValue::Boolean(_) | LuauValue::Integer(_) | LuauValue::String(_) => {
+            false
+        }
+        _ => true,
+    }) {
+        return Err(LootError::new(
+            expression.location.clone(),
+            "exclude expression requires finite scalar values or a sequence of them",
+        ));
+    }
+    Ok(values)
 }
 
-impl ReadOnlyContext for GuardContext<'_> {
+fn evaluate_context_expression(
+    expression: &ContextExpression,
+    locals: &BTreeMap<String, Value>,
+    reader: Option<&ReferenceReader<'_>>,
+) -> Result<LuauValue, LootError> {
+    let result = if let Some(reader) = reader {
+        expression.expression.evaluate_context(&ExpressionContext {
+            locals,
+            reader,
+            sequence_only: expression.attribute == "exclude",
+        })
+    } else {
+        let inputs = expression
+            .inputs
+            .iter()
+            .filter_map(|name| locals.get(name).map(|value| (name, value)))
+            .map(|(name, value)| value.to_luau().map(|value| (name.clone(), value)))
+            .collect::<Result<BTreeMap<_, _>, _>>()
+            .map_err(|error| LootError::new(expression.location.clone(), error))?;
+        expression.expression.evaluate(&inputs)
+    };
+    result.map_err(|error| {
+        LootError::new(
+            expression.location.clone(),
+            format!("{} expression failed: {error}", expression.attribute),
+        )
+    })
+}
+
+fn excluded(value: &Value, exclusions: &LuauValue) -> bool {
+    match exclusions {
+        LuauValue::Nil => false,
+        LuauValue::Boolean(right) => matches!(value, Value::Boolean(left) if left == right),
+        LuauValue::String(right) => matches!(value, Value::String(left) if left.as_ref() == right),
+        LuauValue::Integer(right) => match value {
+            Value::Integer(left) => left == right,
+            Value::Number(left) => integer_equals_number(*right, *left),
+            _ => false,
+        },
+        LuauValue::Number(right) => match value {
+            Value::Integer(left) => integer_equals_number(*left, *right),
+            Value::Number(left) => left == right,
+            _ => false,
+        },
+        _ => unreachable!("exclusions contain only validated scalar values"),
+    }
+}
+
+fn integer_equals_number(integer: i64, number: f64) -> bool {
+    number.fract() == 0.
+        && number >= i64::MIN as f64
+        && number < -(i64::MIN as f64)
+        && integer == number as i64
+}
+
+struct ExpressionContext<'a> {
+    locals: &'a BTreeMap<String, Value>,
+    reader: &'a ReferenceReader<'a>,
+    sequence_only: bool,
+}
+
+impl ReadOnlyContext for ExpressionContext<'_> {
     fn read(&self, path: &[LuauValue]) -> Result<ReadOnlyValue, inslag_luau::Error> {
         let (value, rest) =
             context_lookup(self.locals, path).map_err(inslag_luau::Error::runtime)?;
@@ -509,7 +596,10 @@ impl ReadOnlyContext for GuardContext<'_> {
             context_lookup(self.locals, path).map_err(inslag_luau::Error::runtime)?;
         match value {
             Value::List(values) => Ok(values.len()),
-            Value::Record(_) => Ok(0),
+            Value::Record(values) if !self.sequence_only || values.is_empty() => Ok(0),
+            Value::Record(_) => Err(inslag_luau::Error::runtime(
+                "exclude requires a sequence, not a record",
+            )),
             Value::Reference(reference) => {
                 match (self.reader)(reference, rest).map_err(inslag_luau::Error::runtime)? {
                     ReadOnlyValue::Value(LuauValue::Sequence(values)) => Ok(values.len()),
