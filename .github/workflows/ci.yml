@@ -88,16 +88,24 @@ jobs:
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
         key: test-${{ matrix.features }}
+        cache-on-failure: true
     - name: Clippy
       if: matrix.clippy
-      run: cargo clippy --locked --workspace --all-targets ${{ matrix.features == 'all' && '--all-features' || '' }} -- -D warnings
+      run: cargo clippy --timings --locked --workspace --all-targets ${{ matrix.features == 'all' && '--all-features' || '' }} -- -D warnings
     - name: Run tests and doctests
-      run: cargo test --locked --workspace ${{ matrix.features == 'all' && '--all-features' || '' }}
+      run: cargo test --timings --locked --workspace ${{ matrix.features == 'all' && '--all-features' || '' }}
     - name: Smoke-test benchmarks
-      run: cargo test --locked --workspace ${{ matrix.features == 'all' && '--all-features' || '' }}
+      run: cargo test --timings --locked --workspace ${{ matrix.features == 'all' && '--all-features' || '' }}
     - name: Build documentation
       if: matrix.docs
-      run: cargo doc --locked --workspace --no-deps --all-features
+      run: cargo doc --timings --locked --workspace --no-deps --all-features
+    - name: Upload build timings
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: timings-${{ matrix.os }}-${{ matrix.rust }}-${{ matrix.features }}
+        path: target/cargo-timings/*.html
+        if-no-files-found: ignore
 
   dylint:
     name: Dylint
@@ -119,8 +127,16 @@ jobs:
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
         key: dylint
+        cache-on-failure: true
     - name: Install dylint
       run: cargo install cargo-dylint dylint-link --version 6.3.2 --locked
     - name: Dylint
       working-directory: .
-      run: cargo dylint --all --fail-on-no-libraries -- --workspace --all-targets --locked --config 'build.rustflags=["-Dwarnings","-Zalways-encode-mir"]'
+      run: cargo dylint --all --fail-on-no-libraries -- --timings --workspace --all-targets --locked --config 'build.rustflags=["-Dwarnings","-Zalways-encode-mir"]'
+    - name: Upload build timings
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: timings-dylint
+        path: target/**/cargo-timings/*.html
+        if-no-files-found: ignore
