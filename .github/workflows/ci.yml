@@ -70,6 +70,9 @@ jobs:
     env:
       RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
       RUSTDOCFLAGS: -D warnings
+      # Full Bevy debug artifacts can exhaust the hosted runner's disk during linking.
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
     defaults:
       run:
         shell: bash
@@ -99,6 +102,14 @@ jobs:
     - name: Build documentation
       if: matrix.docs
       run: cargo doc --timings --locked --workspace --no-deps --all-features
+    - name: Report runner resources on failure
+      if: failure() && runner.os == 'Linux'
+      run: |
+        df -h
+        free -h
+        if [[ -d target ]]; then
+          du -sh target
+        fi
     - name: Upload build timings
       if: always()
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
