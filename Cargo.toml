@@ -12,6 +12,8 @@ repository = "https://github.com/fxyoge/inslag"
 
 [workspace.dependencies]
 inslag_audio = { version = "0.1.0", path = "crates/inslag_audio" }
+inslag_e2e = { version = "0.1.0", path = "crates/inslag_e2e" }
+inslag_e2e_build = { version = "0.1.0", path = "crates/inslag_e2e_build" }
 inslag_kui = { version = "0.1.0", path = "crates/inslag_kui" }
 inslag_format_loot = { version = "0.1.0", path = "crates/inslag_format_loot" }
 inslag_loot_macros = { version = "0.1.0", path = "crates/inslag_loot_macros" }
@@ -37,6 +39,7 @@ fastrand = "2"
 thiserror = "2.0"
 divan = "0.1.21"
 tempfile = "3"
+toml = "0.8"
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
@@ -57,6 +60,7 @@ tracing = "0.1"
 [workspace.lints.rust]
 unsafe_code = "forbid"
 unreachable_pub = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(dylint_lib, values("bevy_enforce_bevy_enhanced_input", "inslag_state_tree_private_access"))'] }
 
 [workspace.lints.clippy]
 all = "warn"

@@ -1,0 +1,14 @@
+[package]
+name = "inslag_e2e_build"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Dependency-free build-time discovery for inslag_e2e"
+license = "MIT OR Apache-2.0"
+repository.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

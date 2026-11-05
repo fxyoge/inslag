@@ -3,6 +3,7 @@
 Opinionated asset-backed game authoring for Bevy.
 
 - [inslag_audio](crates/inslag_audio/): asset-backed audio authored through Bevy statecharts.
+- [inslag_e2e](crates/inslag_e2e/): headless, player-input-only Luau end-to-end tests for Bevy games.
 - [inslag_kui](crates/inslag_kui/): asset-backed declarative interfaces for Bevy.
 - [inslag_kui_workbench](crates/inslag_kui_workbench/): a visual workbench for KUI assets.
 - [inslag_luau](crates/inslag_luau/): portable, compile-once Luau expressions with native fast paths.

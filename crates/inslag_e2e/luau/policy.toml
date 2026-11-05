@@ -1,0 +1,10 @@
+# Global renderer-free CPU update budgets. No per-scenario exemptions.
+simulation_hz = 60
+max_frames = 10000
+wall_timeout_seconds = 60
+condition_timeout_frames = 300
+
+[frame_time]
+p50_ms = 16.0
+p95_ms = 2000.0
+max_ms = 2000.0

@@ -1,0 +1,41 @@
+[package]
+name = "inslag_e2e"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Headless, player-input-only Luau end-to-end tests for Bevy games"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bevy = { workspace = true, features = [
+    "default_app",
+    "2d_bevy_render",
+    "ui_bevy_render",
+    "bevy_winit",
+    "default_font",
+    "multi_threaded",
+    "png",
+    "x11",
+    "bevy_audio",
+    "wav",
+    "bevy_picking",
+    "sprite_picking",
+    "ui_picking",
+    "serialize",
+    "debug",
+] }
+inslag_kui.workspace = true
+inslag_state_tree.workspace = true
+inslag_persist.workspace = true
+mlua = { workspace = true, features = ["serialize"] }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+inslag_audio = { workspace = true, default-features = false, features = ["wav"] }
+
+[lints]
+workspace = true
