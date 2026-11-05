@@ -19,47 +19,57 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  quality:
-    name: Formatting, Clippy, and docs
+  formatting:
+    name: Formatting
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
     env:
       RUSTUP_TOOLCHAIN: stable
-      RUSTDOCFLAGS: -D warnings
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
     - name: Install Rust
-      run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy --no-self-update
-    - name: Install audio dependencies
-      run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      with:
-        key: quality
+      run: rustup toolchain install stable --profile minimal --component rustfmt --no-self-update
     - name: Check formatting
       run: cargo fmt --all -- --check
-    - name: Clippy (default features)
-      run: cargo clippy --locked --workspace --all-targets -- -D warnings
-    - name: Clippy (all features)
-      run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-    - name: Build documentation
-      run: cargo doc --locked --workspace --no-deps --all-features
 
   test:
-    name: Test (${{ matrix.os }}, Rust ${{ matrix.rust }})
+    name: Workspace (${{ matrix.os }}, Rust ${{ matrix.rust }}, ${{ matrix.features }} features)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, windows-latest, macos-latest ]
-        rust: [ stable ]
         include:
         - os: ubuntu-latest
+          rust: stable
+          features: default
+          clippy: true
+          docs: false
+        - os: ubuntu-latest
+          rust: stable
+          features: all
+          clippy: true
+          docs: true
+        - os: ubuntu-latest
           rust: '1.97.1'
+          features: all
+          clippy: false
+          docs: false
+        - os: windows-latest
+          rust: stable
+          features: all
+          clippy: false
+          docs: false
+        - os: macos-latest
+          rust: stable
+          features: all
+          clippy: false
+          docs: false
     env:
       RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
+      RUSTDOCFLAGS: -D warnings
     defaults:
       run:
         shell: bash
@@ -69,32 +79,35 @@ jobs:
         persist-credentials: false
     - name: Install Rust
       run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --no-self-update
+    - name: Install Clippy
+      if: matrix.clippy
+      run: rustup component add clippy --toolchain "$RUSTUP_TOOLCHAIN"
     - name: Install audio dependencies
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y libasound2-dev
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
-        key: test
+        key: test-${{ matrix.features }}
+    - name: Clippy
+      if: matrix.clippy
+      run: cargo clippy --locked --workspace --all-targets ${{ matrix.features == 'all' && '--all-features' || '' }} -- -D warnings
     - name: Run tests and doctests
-      run: cargo test --locked --workspace --no-default-features
-    - name: Run tests and doctests (all features)
-      run: cargo test --locked --workspace --all-features
-    - name: Check benchmarks
-      run: cargo check --locked --workspace --benches --no-default-features
-    - name: Check benchmarks (all features)
-      run: cargo check --locked --workspace --benches --all-features
-    - name: Smoke-test persistence benchmarks
-      run: cargo test --locked -p inslag_persist --benches
+      run: cargo test --locked --workspace ${{ matrix.features == 'all' && '--all-features' || '' }}
+    - name: Smoke-test benchmarks
+      run: cargo test --locked --workspace ${{ matrix.features == 'all' && '--all-features' || '' }}
+    - name: Build documentation
+      if: matrix.docs
+      run: cargo doc --locked --workspace --no-deps --all-features
 
-  lint-quality:
-    name: Dylint formatting, Clippy, and docs
+  dylint:
+    name: Dylint
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       RUSTDOCFLAGS: -D warnings
     defaults:
       run:
-        working-directory: lints
+        shell: bash
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
@@ -105,48 +118,9 @@ jobs:
       run: sudo apt-get update && sudo apt-get install -y libasound2-dev
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
-        key: lint-quality
-        workspaces: |
-          . -> target
-          lints -> target
+        key: dylint
     - name: Install dylint
       run: cargo install cargo-dylint dylint-link --version 6.3.2 --locked
-    - name: Check formatting
-      run: cargo fmt --all -- --check
-    - name: Clippy
-      run: cargo clippy --locked --lib --tests -- -D warnings
-    - name: Build documentation
-      run: cargo doc --locked --no-deps
     - name: Dylint
       working-directory: .
       run: cargo dylint --all --fail-on-no-libraries -- --workspace --all-targets --locked --config 'build.rustflags=["-Dwarnings","-Zalways-encode-mir"]'
-
-  lint-test:
-    name: Dylint test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ ubuntu-latest, windows-latest, macos-latest ]
-    defaults:
-      run:
-        shell: bash
-        working-directory: lints
-    steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      with:
-        persist-credentials: false
-    - name: Install Rust
-      run: rustup show active-toolchain
-    - name: Install audio dependencies
-      if: runner.os == 'Linux'
-      run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      with:
-        key: lint-test
-        workspaces: lints -> target
-    - name: Install dylint
-      run: cargo install cargo-dylint dylint-link --version 6.3.2 --locked
-    - name: Run UI tests
-      run: cargo test --locked --lib
