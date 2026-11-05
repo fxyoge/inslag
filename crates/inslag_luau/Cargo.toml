@@ -1,0 +1,26 @@
+[package]
+name = "inslag_luau"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Portable Luau expressions with native fast paths for Bevy authoring"
+license.workspace = true
+repository.workspace = true
+
+[features]
+serde = ["dep:serde"]
+
+[dependencies]
+full_moon.workspace = true
+mlua.workspace = true
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[[bench]]
+name = "expressions"
+harness = false
+
+[lints]
+workspace = true

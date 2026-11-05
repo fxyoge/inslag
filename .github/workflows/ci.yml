@@ -72,8 +72,12 @@ jobs:
         key: test
     - name: Run tests and doctests
       run: cargo test --locked --workspace --no-default-features
+    - name: Run tests and doctests (all features)
+      run: cargo test --locked --workspace --all-features
     - name: Check benchmarks
       run: cargo check --locked --workspace --benches --no-default-features
+    - name: Check benchmarks (all features)
+      run: cargo check --locked --workspace --benches --all-features
 
   lint-quality:
     name: Dylint formatting, Clippy, and docs

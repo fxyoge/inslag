@@ -2,6 +2,7 @@
 
 Opinionated asset-backed game authoring for Bevy.
 
+- [inslag_luau](crates/inslag_luau/): portable, compile-once Luau expressions with native fast paths.
 - [inslag_loot](crates/inslag_loot/): weighted choices, reusable tables, and relationships between generated results.
 
 Disclaimer: this is not production ready. Expect breaking changes.

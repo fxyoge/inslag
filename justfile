@@ -6,7 +6,8 @@ default:
   @just --list
 
 bench: \
-  _bench-loot-execution
+  _bench-loot-execution \
+  _bench-luau-expressions
 
 docs: \
   _watch-docs
@@ -39,6 +40,9 @@ _lint-workspace:
 
 _bench-loot-execution:
   cargo bench -p inslag_loot --bench execution
+
+_bench-luau-expressions:
+  cargo bench -p inslag_luau --bench expressions
 
 [script]
 [cache(inputs = [split(`rg --files --glob '**/*.rs'`)], outputs = "target-docs")]
