@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "bevy_enforce_inslag_audio",
     "bevy_enforce_bevy_enhanced_input",
     "bevy_indirect_system_registration",
     "unchained_builder",

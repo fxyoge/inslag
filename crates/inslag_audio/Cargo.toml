@@ -1,0 +1,31 @@
+[package]
+name = "inslag_audio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Asset-backed audio playback authored through Bevy statecharts"
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["wav", "vorbis"]
+wav = ["bevy_audio/wav"]
+vorbis = ["bevy_audio/vorbis"]
+mp3 = ["bevy_audio/mp3"]
+flac = ["bevy_audio/flac"]
+
+[dependencies]
+bevy_app.workspace = true
+bevy_asset.workspace = true
+bevy_audio.workspace = true
+bevy_ecs.workspace = true
+bevy_time.workspace = true
+inslag_state_tree.workspace = true
+rodio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

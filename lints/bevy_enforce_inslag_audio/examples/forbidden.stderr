@@ -1,0 +1,91 @@
+error: raw audio API `AudioSource` bypasses authored audio playback
+  --> $DIR/forbidden.rs:3:5
+   |
+LL | use bevy_audio::AudioSource as Clip;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: select asset references through `inslag_audio` SCXML effects or activities; use `AudioMixer` for user volume preferences
+   = note: `#[deny(bevy_enforce_inslag_audio)]` on by default
+
+error: raw audio API `AudioSource` bypasses authored audio playback
+  --> $DIR/forbidden.rs:5:34
+   |
+LL | type Cached = bevy_asset::Handle<Clip>;
+   |                                  ^^^^
+   |
+   = help: select asset references through `inslag_audio` SCXML effects or activities; use `AudioMixer` for user volume preferences
+
+error: raw audio API `AudioPlayer` bypasses authored audio playback
+  --> $DIR/forbidden.rs:7:11
+   |
+LL | fn raw(_: bevy_audio::AudioPlayer, _: &mut bevy_audio::AudioSink) {}
+   |           ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: select asset references through `inslag_audio` SCXML effects or activities; use `AudioMixer` for user volume preferences
+
+error: raw audio API `AudioSink` bypasses authored audio playback
+  --> $DIR/forbidden.rs:7:44
+   |
+LL | fn raw(_: bevy_audio::AudioPlayer, _: &mut bevy_audio::AudioSink) {}
+   |                                            ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: select asset references through `inslag_audio` SCXML effects or activities; use `AudioMixer` for user volume preferences
+
+error: raw audio API `AudioSource` bypasses authored audio playback
+  --> $DIR/forbidden.rs:11:62
+   |
+LL |     mut assets: bevy_ecs::prelude::ResMut<bevy_asset::Assets<Clip>>,
+   |                                                              ^^^^
+   |
+   = help: select asset references through `inslag_audio` SCXML effects or activities; use `AudioMixer` for user volume preferences
+
+error: raw audio API `AudioSource` bypasses authored audio playback
+  --> $DIR/forbidden.rs:13:18
+   |
+LL |     let handle = server.load("audio/confirm.wav");
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: select asset references through `inslag_audio` SCXML effects or activities; use `AudioMixer` for user volume preferences
+
+error: raw audio API `AudioSource` bypasses authored audio playback
+  --> $DIR/forbidden.rs:14:5
+   |
+LL |     assets.remove(handle.id());
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: select asset references through `inslag_audio` SCXML effects or activities; use `AudioMixer` for user volume preferences
+
+error: raw audio API `AudioSource` bypasses authored audio playback
+  --> $DIR/forbidden.rs:17:22
+   |
+LL | fn construct(handle: Cached) {
+   |                      ^^^^^^
+   |
+   = help: select asset references through `inslag_audio` SCXML effects or activities; use `AudioMixer` for user volume preferences
+
+error: raw audio API `AudioPlayer` bypasses authored audio playback
+  --> $DIR/forbidden.rs:18:13
+   |
+LL |     let _ = bevy_audio::AudioPlayer::new(handle.clone());
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: select asset references through `inslag_audio` SCXML effects or activities; use `AudioMixer` for user volume preferences
+
+error: raw audio API `AudioPlayer` bypasses authored audio playback
+  --> $DIR/forbidden.rs:19:13
+   |
+LL |     let _ = bevy_audio::AudioPlayer(handle);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: select asset references through `inslag_audio` SCXML effects or activities; use `AudioMixer` for user volume preferences
+
+error: raw audio API `Player` bypasses authored audio playback
+  --> $DIR/forbidden.rs:22:16
+   |
+LL | fn backend(_: &rodio::Player) {}
+   |                ^^^^^^^^^^^^^
+   |
+   = help: select asset references through `inslag_audio` SCXML effects or activities; use `AudioMixer` for user volume preferences
+
+error: aborting due to 11 previous errors
+

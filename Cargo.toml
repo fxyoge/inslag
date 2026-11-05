@@ -11,6 +11,7 @@ license = "MIT"
 repository = "https://github.com/fxyoge/inslag"
 
 [workspace.dependencies]
+inslag_audio = { version = "0.1.0", path = "crates/inslag_audio" }
 inslag_kui = { version = "0.1.0", path = "crates/inslag_kui" }
 inslag_format_loot = { version = "0.1.0", path = "crates/inslag_format_loot" }
 inslag_loot_macros = { version = "0.1.0", path = "crates/inslag_loot_macros" }
@@ -23,6 +24,7 @@ winnow = "1.0"
 proptest = { version = "1", default-features = false, features = ["std"] }
 bevy_app = "0.20.0"
 bevy_asset = "0.20.0"
+bevy_audio = "0.20.0"
 bevy_ecs = { version = "0.20.0", features = ["multi_threaded"] }
 bevy_reflect = "0.20.0"
 bevy_tasks = "0.20.0"
@@ -49,6 +51,8 @@ bevy_flair = { git = "https://github.com/fxyoge/bevy_flair.git", rev = "b9d7b2c5
 bevy_aseprite_ultra = "0.10.0"
 arboard = { version = "3", default-features = false }
 bevy_enhanced_input = { version = "0.27", default-features = false }
+rodio = { version = "0.22", default-features = false }
+tracing = "0.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

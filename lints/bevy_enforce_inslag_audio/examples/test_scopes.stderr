@@ -1,0 +1,11 @@
+error: raw audio API `AudioPlayer` bypasses authored audio playback
+  --> $DIR/test_scopes.rs:13:18
+   |
+LL | fn production(_: bevy_audio::AudioPlayer) {}
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: select asset references through `inslag_audio` SCXML effects or activities; use `AudioMixer` for user volume preferences
+   = note: `#[deny(bevy_enforce_inslag_audio)]` on by default
+
+error: aborting due to 1 previous error
+

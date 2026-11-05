@@ -1,0 +1,19 @@
+error: raw audio API `AudioPlayer` bypasses authored audio playback
+  --> $DIR/macros.rs:14:1
+   |
+LL | raw_player!();
+   | ^^^^^^^^^^^^^
+   |
+   = help: select asset references through `inslag_audio` SCXML effects or activities; use `AudioMixer` for user volume preferences
+   = note: `#[deny(bevy_enforce_inslag_audio)]` on by default
+
+error: raw audio API `AudioSource` bypasses authored audio playback
+  --> $DIR/macros.rs:15:14
+   |
+LL | caller_type!(bevy_audio::AudioSource);
+   |              ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: select asset references through `inslag_audio` SCXML effects or activities; use `AudioMixer` for user volume preferences
+
+error: aborting due to 2 previous errors
+
