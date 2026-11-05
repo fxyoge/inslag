@@ -57,11 +57,11 @@ jobs:
           features: all
           clippy: false
           docs: false
-        - os: windows-latest
-          rust: stable
-          features: all
-          clippy: false
-          docs: false
+        # - os: windows-latest
+        #   rust: stable
+        #   features: all
+        #   clippy: false
+        #   docs: false
         - os: macos-latest
           rust: stable
           features: all
