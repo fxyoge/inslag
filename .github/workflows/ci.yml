@@ -141,6 +141,15 @@ jobs:
         cache-on-failure: true
     - name: Install dylint
       run: cargo install cargo-dylint dylint-link --version 6.3.2 --locked
+    - name: Check lint formatting
+      working-directory: lints
+      run: cargo fmt --all --check
+    - name: Clippy for lints
+      working-directory: lints
+      run: cargo clippy --locked --lib --tests -- -D warnings
+    - name: Test lints
+      working-directory: lints
+      run: cargo test --locked --lib
     - name: Dylint
       working-directory: .
       run: cargo dylint --all --fail-on-no-libraries -- --timings --workspace --all-targets --locked --config 'build.rustflags=["-Dwarnings","-Zalways-encode-mir"]'

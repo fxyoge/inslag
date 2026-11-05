@@ -1,0 +1,24 @@
+[package]
+name = "inslag_state_tree_private_access"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Keep production Rust from inspecting private state-tree data and authored states"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+dylint_linting.workspace = true
+
+[dev-dependencies]
+dylint_testing.workspace = true
+ecs = { package = "bevy_ecs", version = "0.20.0", default-features = false }
+# Rename the real dependency so every fixture also exercises crate renaming.
+state_tree = { package = "inslag_state_tree", path = "../../crates/inslag_state_tree" }
+
+[lints]
+workspace = true
+
+[package.metadata.rust-analyzer]
+rustc_private = true

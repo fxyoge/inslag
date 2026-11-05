@@ -388,6 +388,13 @@ impl Fixture {
         }
     }
 
+    #[cfg_attr(
+        dylint_lib = "inslag_state_tree_private_access",
+        allow(
+            inslag_state_tree_private_access,
+            reason = "benchmark assertions verify authored chart counters"
+        )
+    )]
     fn number(&self, owner: Entity, name: &str) -> usize {
         match self
             .app
@@ -667,6 +674,13 @@ impl Fixture {
     }
 
     /// Verification and pending protocol-event delivery are outside timing.
+    #[cfg_attr(
+        dylint_lib = "inslag_state_tree_private_access",
+        allow(
+            inslag_state_tree_private_access,
+            reason = "benchmark assertions verify authored chart behavior"
+        )
+    )]
     pub fn verify(&mut self) {
         for _ in 0..2 {
             self.app.update();

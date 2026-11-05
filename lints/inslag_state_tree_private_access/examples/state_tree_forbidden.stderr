@@ -1,0 +1,75 @@
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_forbidden.rs:7:18
+   |
+LL |     let _ = tree.data("placing");
+   |                  ^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+   = note: `#[warn(inslag_state_tree_private_access)]` on by default
+
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_forbidden.rs:8:18
+   |
+LL |     let _ = tree.data(key);
+   |                  ^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+
+warning: inspecting authored state-tree states couples Rust code to private statechart internals
+  --> $DIR/state_tree_forbidden.rs:9:18
+   |
+LL |     let _ = tree.active_states();
+   |                  ^^^^^^^^^^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+
+warning: inspecting authored state-tree states couples Rust code to private statechart internals
+  --> $DIR/state_tree_forbidden.rs:10:18
+   |
+LL |     let _ = tree.active_state_names();
+   |                  ^^^^^^^^^^^^^^^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_forbidden.rs:14:21
+   |
+LL |     let _ = context.data("placing");
+   |                     ^^^^
+   |
+   = help: pass explicitly authored effect/activity arguments through `StateTreeArgs` instead
+
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_forbidden.rs:18:21
+   |
+LL |     let _ = context.data("placing");
+   |                     ^^^^
+   |
+   = help: pass explicitly authored effect/activity arguments through `StateTreeArgs` instead
+
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_forbidden.rs:22:21
+   |
+LL |     let _ = context.data("placing");
+   |                     ^^^^
+   |
+   = help: pass explicitly authored effect/activity arguments through `StateTreeArgs` instead
+
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_forbidden.rs:27:22
+   |
+LL |         let _ = tree.data("placing");
+   |                      ^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+
+warning: inspecting authored state-tree states couples Rust code to private statechart internals
+  --> $DIR/state_tree_forbidden.rs:32:18
+   |
+LL |     let _ = tree.active_state_names();
+   |                  ^^^^^^^^^^^^^^^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+
+warning: 9 warnings emitted
+

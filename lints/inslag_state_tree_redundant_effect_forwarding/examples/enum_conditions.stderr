@@ -1,0 +1,57 @@
+error: redundant forwarding of effects `arcade.retry` and `arcade.start` through a shared message type
+  --> $DIR/enum_conditions.rs:24:12
+   |
+LL |         if let Command::Retry { seed } = command {
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: this effect fixes one discriminator value
+  --> $DIR/enum_conditions.rs:15:32
+   |
+LL |         .add_state_tree_effect("arcade.retry", |_, args| {
+   |                                ^^^^^^^^^^^^^^
+note: this effect fixes a different discriminator value
+  --> $DIR/enum_conditions.rs:14:32
+   |
+LL |         .add_state_tree_effect("arcade.start", |_, _| Ok(Command::Start))
+   |                                ^^^^^^^^^^^^^^
+   = help: give each operation its own message type and consume it with `MessageReader<T>`
+   = note: `#[deny(inslag_state_tree_redundant_effect_forwarding)]` on by default
+
+error: redundant forwarding of effects `arcade.start` and `arcade.retry` through a shared message type
+  --> $DIR/enum_conditions.rs:27:12
+   |
+LL |         if *command == Command::Start {
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: this effect fixes one discriminator value
+  --> $DIR/enum_conditions.rs:14:32
+   |
+LL |         .add_state_tree_effect("arcade.start", |_, _| Ok(Command::Start))
+   |                                ^^^^^^^^^^^^^^
+note: this effect fixes a different discriminator value
+  --> $DIR/enum_conditions.rs:15:32
+   |
+LL |         .add_state_tree_effect("arcade.retry", |_, args| {
+   |                                ^^^^^^^^^^^^^^
+   = help: give each operation its own message type and consume it with `MessageReader<T>`
+
+error: redundant forwarding of effects `arcade.start` and `arcade.retry` through a shared message type
+  --> $DIR/enum_conditions.rs:30:12
+   |
+LL |         if Command::Start != *command {
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: this effect fixes one discriminator value
+  --> $DIR/enum_conditions.rs:14:32
+   |
+LL |         .add_state_tree_effect("arcade.start", |_, _| Ok(Command::Start))
+   |                                ^^^^^^^^^^^^^^
+note: this effect fixes a different discriminator value
+  --> $DIR/enum_conditions.rs:15:32
+   |
+LL |         .add_state_tree_effect("arcade.retry", |_, args| {
+   |                                ^^^^^^^^^^^^^^
+   = help: give each operation its own message type and consume it with `MessageReader<T>`
+
+error: aborting due to 3 previous errors
+

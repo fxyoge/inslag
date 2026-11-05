@@ -5,6 +5,8 @@ members = [
     "bevy_indirect_system_registration",
     "unchained_builder",
     "discarded_projection_work",
+    "inslag_state_tree_private_access",
+    "inslag_state_tree_redundant_effect_forwarding",
 ]
 resolver = "3"
 

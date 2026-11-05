@@ -346,6 +346,13 @@ fn remove_view(
     }
 }
 
+#[cfg_attr(
+    dylint_lib = "inslag_state_tree_private_access",
+    allow(
+        inslag_state_tree_private_access,
+        reason = "the generic KUI adapter supplies explicitly authored view bindings"
+    )
+)]
 fn supply_data(
     mut views: Query<(&mut StateTreeView, &mut KuiView)>,
     controllers: Query<Ref<StateTreeInstance>>,
@@ -503,6 +510,13 @@ fn collect_component_data(
     }
 }
 
+#[cfg_attr(
+    dylint_lib = "inslag_state_tree_private_access",
+    allow(
+        inslag_state_tree_private_access,
+        reason = "the generic KUI adapter resolves explicitly authored binding roots"
+    )
+)]
 fn collect_path_data(
     path: &str,
     instance: &StateTreeInstance,

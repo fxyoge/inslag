@@ -34,6 +34,7 @@ harness = false
 
 [lints.rust]
 unsafe_code = "forbid"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(dylint_lib, values("inslag_state_tree_private_access"))'] }
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

@@ -1,0 +1,91 @@
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_resolved_paths.rs:10:13
+   |
+LL |     let _ = state_tree::StateTreeInstance::data(tree, "placing");
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+   = note: `#[warn(inslag_state_tree_private_access)]` on by default
+
+warning: inspecting authored state-tree states couples Rust code to private statechart internals
+  --> $DIR/state_tree_resolved_paths.rs:11:13
+   |
+LL |     let _ = Instance::active_states(tree);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+
+warning: inspecting authored state-tree states couples Rust code to private statechart internals
+  --> $DIR/state_tree_resolved_paths.rs:12:13
+   |
+LL |     let _ = Tree::active_state_names(tree);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_resolved_paths.rs:13:13
+   |
+LL |     let _ = facade::Controller::data(tree, "placing");
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_resolved_paths.rs:14:13
+   |
+LL |     let _ = state_tree::StateTreeEffectContext::data(&context, "placing");
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: pass explicitly authored effect/activity arguments through `StateTreeArgs` instead
+
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_resolved_paths.rs:18:16
+   |
+LL |     let read = Instance::data;
+   |                ^^^^^^^^^^^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+
+warning: inspecting authored state-tree states couples Rust code to private statechart internals
+  --> $DIR/state_tree_resolved_paths.rs:20:13
+   |
+LL |     let _ = Instance::active_states;
+   |             ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+
+warning: inspecting authored state-tree states couples Rust code to private statechart internals
+  --> $DIR/state_tree_resolved_paths.rs:21:13
+   |
+LL |     let _ = Instance::active_state_names;
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_resolved_paths.rs:22:13
+   |
+LL |     let _ = state_tree::StateTreeContext::data;
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: pass explicitly authored effect/activity arguments through `StateTreeArgs` instead
+
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_resolved_paths.rs:23:13
+   |
+LL |     let _ = state_tree::StateTreeActivityContext::data;
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: pass explicitly authored effect/activity arguments through `StateTreeArgs` instead
+
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_resolved_paths.rs:27:18
+   |
+LL |     let _ = tree.data("placing");
+   |                  ^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+
+warning: 11 warnings emitted
+

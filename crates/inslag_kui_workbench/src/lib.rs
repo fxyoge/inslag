@@ -851,6 +851,13 @@ fn sync_chrome(world: &mut World, tool: &mut Workbench) {
             .collect::<Vec<_>>()
             .join("\n"),
     );
+    #[cfg_attr(
+        dylint_lib = "inslag_state_tree_private_access",
+        allow(
+            inslag_state_tree_private_access,
+            reason = "the workbench displays authored preview diagnostics"
+        )
+    )]
     let status = tool
         .preview_mount
         .and_then(|controller| world.get::<StateTreeInstance>(controller))

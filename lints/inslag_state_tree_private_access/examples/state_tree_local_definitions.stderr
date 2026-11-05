@@ -1,0 +1,11 @@
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_local_definitions.rs:12:31
+   |
+LL |     let _ = StateTreeInstance.data("private");
+   |                               ^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+   = note: `#[warn(inslag_state_tree_private_access)]` on by default
+
+warning: 1 warning emitted
+

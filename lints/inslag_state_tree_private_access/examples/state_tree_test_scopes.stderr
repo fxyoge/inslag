@@ -1,0 +1,19 @@
+warning: reading state-tree datamodel data couples Rust code to private statechart internals
+  --> $DIR/state_tree_test_scopes.rs:38:18
+   |
+LL |     let _ = tree.data("placing");
+   |                  ^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+   = note: `#[warn(inslag_state_tree_private_access)]` on by default
+
+warning: inspecting authored state-tree states couples Rust code to private statechart internals
+  --> $DIR/state_tree_test_scopes.rs:39:21
+   |
+LL |     let _ = || tree.active_states();
+   |                     ^^^^^^^^^^^^^
+   |
+   = help: send an event and let the statechart decide whether to handle it, or expose the needed information through an effect or activity
+
+warning: 2 warnings emitted
+

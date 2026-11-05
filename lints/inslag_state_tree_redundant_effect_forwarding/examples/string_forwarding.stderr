@@ -1,0 +1,25 @@
+error: redundant forwarding of effects `game.confirm` and `game.back` through a shared message type
+  --> $DIR/string_forwarding.rs:28:9
+   |
+LL | /         match action {
+LL | |             "confirm" => {}
+LL | |             "back" => {}
+LL | |             _ => {}
+LL | |         }
+   | |_________^
+   |
+note: this effect fixes one discriminator value
+  --> $DIR/string_forwarding.rs:13:32
+   |
+LL |         .add_state_tree_effect("game.confirm", |_, _| {
+   |                                ^^^^^^^^^^^^^^
+note: this effect fixes a different discriminator value
+  --> $DIR/string_forwarding.rs:18:32
+   |
+LL |         .add_state_tree_effect("game.back", |_, _| {
+   |                                ^^^^^^^^^^^
+   = help: give each operation its own message type and consume it with `MessageReader<T>`
+   = note: `#[deny(inslag_state_tree_redundant_effect_forwarding)]` on by default
+
+error: aborting due to 1 previous error
+
