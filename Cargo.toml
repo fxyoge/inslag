@@ -11,7 +11,7 @@ license = "MIT"
 repository = "https://github.com/fxyoge/inslag"
 
 [workspace.dependencies]
-inslag_audio = { version = "0.1.0", path = "crates/inslag_audio" }
+inslag_audio = { version = "0.1.0", path = "crates/inslag_audio", default-features = false }
 inslag_e2e = { version = "0.1.0", path = "crates/inslag_e2e" }
 inslag_e2e_build = { version = "0.1.0", path = "crates/inslag_e2e_build" }
 inslag_kui = { version = "0.1.0", path = "crates/inslag_kui" }
