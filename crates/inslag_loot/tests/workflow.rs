@@ -176,6 +176,168 @@ fn configure_request_receive_needs_no_readiness_or_ordering_code() {
 }
 
 #[test]
+fn luau_context_aliases_and_typed_effects_share_a_bag_without_ambiguity() {
+    use inslag_luau::LuauValue;
+    #[derive(Clone, Debug, PartialEq, LootOutput)]
+    enum Inspected {
+        Item(Item),
+        Context(LuauValue),
+    }
+    let (mut app, _directory) = app(
+        &[(
+            "inspected.loot",
+            "table \"root\"\n  @context as=documents\n  choose\n    @item item=sword when=\"documents[1].complete and documents[1].quality > minimum\"\n    @item item=broken when=\"not documents[1].complete\"\n",
+        )],
+        &["inspected.loot"],
+    );
+    app.add_loot_function("context", || {
+        LuauValue::Sequence(vec![LuauValue::Record(
+            [
+                ("complete".into(), LuauValue::Boolean(true)),
+                ("quality".into(), LuauValue::Number(2.)),
+            ]
+            .into(),
+        )])
+    })
+    .add_loot_function("item", item)
+    .add_loot_output::<Inspected>();
+    let finished = roll(
+        &mut app,
+        LootRequest::<Inspected>::new("root").input("minimum", 1.),
+    );
+    let results = finished.result.unwrap();
+    assert_eq!(results.len(), 2);
+    assert!(matches!(&results[0], Inspected::Context(_)));
+    assert!(matches!(&results[1], Inspected::Item(item) if item.definition == "sword"));
+}
+
+#[test]
+fn one_document_context_and_nested_tables_return_only_completed_operations() {
+    #[derive(Component)]
+    struct Quality(f64);
+    #[derive(Clone, Debug, PartialEq, LootArgs, LootOutput)]
+    struct SetQuality {
+        target: Reference,
+        #[loot(primary)]
+        value: f64,
+    }
+    let (mut app, _directory) = app(
+        &[(
+            "operations.loot",
+            r#"table "root"
+  #changes document=$document
+table "changes"
+  choose when="document.quality > 0"
+    #qualities document=$document
+table "qualities" using=document.set-quality target=$document
+  choose
+    1 when="document.quality ~= 1"
+    2 when="document.quality ~= 2"
+table "failed"
+  #changes document=$document
+  nothing when="document.quality.invalid"
+table "suspended"
+  @document.contextual target=$document value=3
+  #changes document=$document
+"#,
+        )],
+        &["operations.loot"],
+    );
+    app.add_loot_context(
+        "document",
+        |reference: &Reference,
+         path: &[inslag_luau::LuauValue],
+         qualities: Query<&Quality>|
+         -> Result<ReadOnlyValue, String> {
+            let entity = Entity::try_from_bits(reference.id).ok_or("invalid reference")?;
+            let quality = qualities.get(entity).map_err(|_| "missing document")?;
+            Ok(match path {
+                [] => ReadOnlyValue::View,
+                [inslag_luau::LuauValue::String(field)] if field == "quality" => {
+                    ReadOnlyValue::Value(inslag_luau::LuauValue::Number(quality.0))
+                }
+                _ => ReadOnlyValue::Value(inslag_luau::LuauValue::Nil),
+            })
+        },
+    )
+    .add_loot_function("document.set-quality", |operation: SetQuality| operation)
+    .add_loot_function(
+        "document.contextual",
+        |operation: SetQuality, qualities: Query<&Quality>| -> Result<SetQuality, String> {
+            qualities
+                .get(Entity::try_from_bits(operation.target.id).ok_or("invalid reference")?)
+                .map_err(|_| "missing document")?;
+            Ok(operation)
+        },
+    )
+    .add_loot_output::<SetQuality>();
+    let first = app.world_mut().spawn(Quality(1.)).id();
+    let second = app.world_mut().spawn(Quality(2.)).id();
+    let request = |table, entity: Entity| {
+        LootRequest::<SetQuality>::new(table)
+            .context("document")
+            .input("document", Reference::new("document", entity.to_bits()))
+            .seed(1)
+    };
+    let mutations = roll(&mut app, request("root", first)).result.unwrap();
+    assert_eq!(mutations.len(), 1);
+    assert_eq!(
+        mutations[0],
+        SetQuality {
+            target: Reference::new("document", first.to_bits()),
+            value: 2.
+        }
+    );
+    assert_eq!(
+        roll(&mut app, request("root", second)).result.unwrap()[0],
+        SetQuality {
+            target: Reference::new("document", second.to_bits()),
+            value: 1.
+        }
+    );
+    assert_eq!(app.world().get::<Quality>(first).unwrap().0, 1.);
+    assert_eq!(app.world().get::<Quality>(second).unwrap().0, 2.);
+    let suspended = roll(&mut app, request("suspended", first)).result.unwrap();
+    assert_eq!(suspended.len(), 2);
+    assert_eq!(suspended[0].value, 3.);
+    assert_eq!(suspended[1].value, 2.);
+    assert!(
+        roll(&mut app, request("failed", first))
+            .result
+            .unwrap_err()
+            .to_string()
+            .contains("when expression failed")
+    );
+    app.world_mut().get_mut::<Quality>(first).unwrap().0 = 2.;
+    assert_eq!(
+        roll(&mut app, request("root", first)).result.unwrap()[0].value,
+        1.
+    );
+    assert!(
+        roll(&mut app, request("root", first).context("unknown"))
+            .result
+            .unwrap_err()
+            .to_string()
+            .contains("unknown loot context")
+    );
+}
+
+#[test]
+fn reference_contexts_reject_deferred_world_mutations() {
+    let (mut app, _directory) = app(&[("root.loot", "table \"root\"\n  1\n")], &["root.loot"]);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        app.add_loot_context(
+            "invalid",
+            |_: &Reference,
+             _: &[inslag_luau::LuauValue],
+             _: Commands|
+             -> Result<ReadOnlyValue, String> { Ok(ReadOnlyValue::View) },
+        );
+    }));
+    assert!(result.is_err());
+}
+
+#[test]
 fn all_preparation_failures_are_terminal_results_with_diagnostics() {
     for (files, paths, expected) in [
         (vec![], vec!["missing.loot"], "missing.loot"),

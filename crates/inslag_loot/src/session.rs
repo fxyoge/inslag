@@ -1,6 +1,10 @@
 use crate::program::{Entry, EntryKind, Expression};
 use crate::{Arguments, Catalog, LootError, SourceLocation, Value, ValueType};
+use inslag_luau::{LuauValue, ReadOnlyContext, ReadOnlyValue};
 use std::{collections::BTreeMap, sync::Arc};
+
+pub(crate) type ReferenceReader<'a> =
+    dyn Fn(&crate::Reference, &[LuauValue]) -> Result<ReadOnlyValue, String> + 'a;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Limits {
@@ -130,11 +134,19 @@ impl Session {
         &self.trace
     }
 
+    #[cfg(test)]
     pub(crate) fn advance(&mut self) -> Result<Step, LootError> {
+        self.advance_with(None)
+    }
+
+    pub(crate) fn advance_with(
+        &mut self,
+        reader: Option<&ReferenceReader<'_>>,
+    ) -> Result<Step, LootError> {
         if let Some(error) = &self.failure {
             return Err(error.clone());
         }
-        let result = self.advance_inner().map_err(|mut error| {
+        let result = self.advance_inner(reader).map_err(|mut error| {
             if error.table_path.is_empty() {
                 error.table_path = self
                     .frames
@@ -150,7 +162,7 @@ impl Session {
         result
     }
 
-    fn advance_inner(&mut self) -> Result<Step, LootError> {
+    fn advance_inner(&mut self, reader: Option<&ReferenceReader<'_>>) -> Result<Step, LootError> {
         if self.pending.is_some() {
             return Ok(Step::Waiting);
         }
@@ -179,7 +191,7 @@ impl Session {
                 return Err(self.error(&entry.location, "evaluation step limit exceeded"));
             }
             let locals = &self.frames.last().expect("frame exists").locals;
-            if !condition(&entry, locals, &mut self.random)? {
+            if !condition(&entry, locals, reader)? {
                 if entry.binding.is_some() {
                     return Err(self.error(&entry.location, "cannot bind a skipped entry"));
                 }
@@ -271,7 +283,7 @@ impl Session {
                     }
                     let mut candidates = Vec::new();
                     for (index, child) in entries.iter().enumerate() {
-                        if condition(child, locals, &mut self.random)? {
+                        if condition(child, locals, reader)? {
                             let weight = integer(
                                 evaluate(&child.weight, locals, &mut self.random, &child.location)?,
                                 "weight",
@@ -432,18 +444,107 @@ impl Session {
 fn condition(
     entry: &Entry,
     locals: &BTreeMap<String, Value>,
-    random: &mut fastrand::Rng,
+    reader: Option<&ReferenceReader<'_>>,
 ) -> Result<bool, LootError> {
     match &entry.condition {
         None => Ok(true),
-        Some(expression) => match evaluate(expression, locals, random, &entry.location)? {
-            Value::Boolean(value) => Ok(value),
-            _ => Err(LootError::new(
-                entry.location.clone(),
-                "when requires a boolean",
-            )),
-        },
+        Some(guard) => {
+            if let Some(reader) = reader {
+                return match guard
+                    .expression
+                    .evaluate_context(&GuardContext { locals, reader })
+                    .map_err(|error| {
+                        LootError::new(
+                            guard.location.clone(),
+                            format!("when expression failed: {error}"),
+                        )
+                    })? {
+                    LuauValue::Boolean(value) => Ok(value),
+                    _ => unreachable!("guards compile with boolean coercion"),
+                };
+            }
+            let inputs = guard
+                .inputs
+                .iter()
+                .filter_map(|name| locals.get(name).map(|value| (name, value)))
+                .map(|(name, value)| value.to_luau().map(|value| (name.clone(), value)))
+                .collect::<Result<BTreeMap<_, _>, _>>()
+                .map_err(|error| LootError::new(guard.location.clone(), error))?;
+            match guard.expression.evaluate(&inputs).map_err(|error| {
+                LootError::new(
+                    guard.location.clone(),
+                    format!("when expression failed: {error}"),
+                )
+            })? {
+                inslag_luau::LuauValue::Boolean(value) => Ok(value),
+                _ => unreachable!("guard expressions compile with Luau truthiness"),
+            }
+        }
     }
+}
+
+struct GuardContext<'a> {
+    locals: &'a BTreeMap<String, Value>,
+    reader: &'a ReferenceReader<'a>,
+}
+
+impl ReadOnlyContext for GuardContext<'_> {
+    fn read(&self, path: &[LuauValue]) -> Result<ReadOnlyValue, inslag_luau::Error> {
+        let (value, rest) =
+            context_lookup(self.locals, path).map_err(inslag_luau::Error::runtime)?;
+        match value {
+            Value::Reference(reference) => {
+                (self.reader)(reference, rest).map_err(inslag_luau::Error::runtime)
+            }
+            Value::List(_) | Value::Record(_) => Ok(ReadOnlyValue::View),
+            value => value
+                .to_luau()
+                .map(ReadOnlyValue::Value)
+                .map_err(inslag_luau::Error::runtime),
+        }
+    }
+
+    fn len(&self, path: &[LuauValue]) -> Result<usize, inslag_luau::Error> {
+        let (value, rest) =
+            context_lookup(self.locals, path).map_err(inslag_luau::Error::runtime)?;
+        match value {
+            Value::List(values) => Ok(values.len()),
+            Value::Record(_) => Ok(0),
+            Value::Reference(reference) => {
+                match (self.reader)(reference, rest).map_err(inslag_luau::Error::runtime)? {
+                    ReadOnlyValue::Value(LuauValue::Sequence(values)) => Ok(values.len()),
+                    _ => Err(inslag_luau::Error::runtime(
+                        "context view is not a sequence",
+                    )),
+                }
+            }
+            _ => Err(inslag_luau::Error::runtime(
+                "context value is not a sequence",
+            )),
+        }
+    }
+}
+
+fn context_lookup<'a, 'p>(
+    locals: &'a BTreeMap<String, Value>,
+    path: &'p [LuauValue],
+) -> Result<(&'a Value, &'p [LuauValue]), String> {
+    static NIL: Value = Value::Nil;
+    let Some((LuauValue::String(root), keys)) = path.split_first() else {
+        return Err("context path needs a named root".into());
+    };
+    let mut value = locals.get(root).unwrap_or(&NIL);
+    for (index, key) in keys.iter().enumerate() {
+        value = match (value, key) {
+            (Value::Reference(_), _) => return Ok((value, &keys[index..])),
+            (Value::List(values), LuauValue::Integer(index)) if *index > 0 => {
+                values.get(*index as usize - 1).unwrap_or(&NIL)
+            }
+            (Value::Record(values), LuauValue::String(key)) => values.get(key).unwrap_or(&NIL),
+            _ => return Err("invalid context index".into()),
+        };
+    }
+    Ok((value, &[]))
 }
 
 fn integer(value: Value, name: &str, location: &SourceLocation) -> Result<u64, LootError> {

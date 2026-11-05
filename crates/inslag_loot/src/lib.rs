@@ -13,7 +13,10 @@ mod value;
 
 #[cfg(test)]
 pub(crate) use bevy::LootRegistry;
-pub use bevy::{LootAppExt, LootFinished, LootFunctionContext, LootPlugin, LootRequest, RollId};
+pub use bevy::{
+    LootAppExt, LootFinished, LootFunctionContext, LootPlugin, LootReferenceContext, LootRequest,
+    RollId,
+};
 #[cfg(test)]
 pub(crate) use catalog::LootTable;
 pub(crate) use catalog::{Catalog, SourceDocument};
@@ -21,6 +24,7 @@ pub use error::LootError;
 pub(crate) use error::SourceLocation;
 pub(crate) use function::{Arguments, FromLootValue, FunctionSignature, FunctionSignatures};
 pub use inslag_loot_macros::{LootArgs, LootOutput, LootValue};
+pub use inslag_luau::{LuauValue, ReadOnlyValue};
 pub(crate) use typed::LootReturn;
 pub use typed::{LootArgs, LootOutput, LootValue};
 pub use value::Reference;
@@ -43,7 +47,7 @@ pub mod __private {
 pub mod prelude {
     pub use crate::{
         LootAppExt, LootArgs, LootError, LootFinished, LootFunctionContext, LootOutput, LootPlugin,
-        LootRequest, LootValue, Reference, RollId,
+        LootRequest, LootValue, ReadOnlyValue, Reference, RollId,
     };
 }
 

@@ -60,6 +60,26 @@ fn strings_decode_both_quote_styles_and_every_escape() {
 }
 
 #[test]
+fn guards_preserve_decoded_luau_and_source_spans_without_compiling() {
+    let source = "table \"root\"\n  1 when=\"values[1] ~= 2 and math.floor(score) > 0\"\n  2 when='function( broken'\n";
+    let document = parse(source).unwrap();
+    let guard = document.tables[0].entries[0].condition.as_ref().unwrap();
+    assert_eq!(guard.value, "values[1] ~= 2 and math.floor(score) > 0");
+    assert_eq!(
+        &source[guard.span.clone()],
+        "\"values[1] ~= 2 and math.floor(score) > 0\""
+    );
+    assert_eq!(
+        document.tables[0].entries[1]
+            .condition
+            .as_ref()
+            .unwrap()
+            .value,
+        "function( broken"
+    );
+}
+
+#[test]
 fn comments_blank_lines_line_endings_and_final_newlines_do_not_change_structure() {
     for input in [
         "table \"root\"\n  1\n",

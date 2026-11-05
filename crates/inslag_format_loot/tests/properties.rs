@@ -25,8 +25,13 @@ fn check_spans(input: &str) {
 fn entry_spans(input: &str, entries: &[Entry]) {
     for entry in entries {
         valid_span(input, &entry.span);
-        for expression in entry.condition.iter().chain(&entry.weight) {
-            valid_span(input, &expression.span);
+        for span in entry
+            .condition
+            .iter()
+            .map(|value| &value.span)
+            .chain(entry.weight.iter().map(|value| &value.span))
+        {
+            valid_span(input, span);
         }
         if let Some(binding) = &entry.binding {
             valid_span(input, &binding.span);

@@ -129,6 +129,18 @@ atom!(
 );
 atom!(f64, ValueType::Number, Value::from);
 atom!(crate::Reference, ValueType::AnyReference, Value::from);
+atom!(
+    inslag_luau::LuauValue,
+    ValueType::OneOf(Arc::from([
+        ValueType::Nil,
+        ValueType::Boolean,
+        ValueType::Number,
+        ValueType::String,
+        ValueType::list(ValueType::Any),
+        ValueType::Record(Box::new(ValueType::Any)),
+    ])),
+    Value::from
+);
 
 impl LootValue for &str {
     fn value_type() -> ValueType {

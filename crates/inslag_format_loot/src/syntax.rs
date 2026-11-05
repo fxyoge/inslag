@@ -41,8 +41,8 @@ pub struct Entry {
     pub kind: EntryKind,
     /// Binding named by `as`, without the attribute prefix.
     pub binding: Option<Spanned<String>>,
-    /// Authored `when` expression; absence does not insert a literal `true`.
-    pub condition: Option<Expression>,
+    /// Luau source for `when`, decoded without compiling it.
+    pub condition: Option<Spanned<String>>,
     /// Authored `weight` expression; absence does not insert a literal `1`.
     pub weight: Option<Expression>,
 }

@@ -6,5 +6,5 @@ table "reward-items" using=item
   choose
     leather_tunic weight=5
     plate_vest weight=3
-    silk_robe rarity=unique weight=10 when=$lucky
-  @currency currency=chaos amount=1 when=$lucky
+    silk_robe rarity=unique weight=10 when="lucky"
+  @currency currency=chaos amount=1 when="lucky"

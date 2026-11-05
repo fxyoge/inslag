@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 inslag_format_loot.workspace = true
 inslag_loot_macros.workspace = true
+inslag_luau.workspace = true
 bevy_app.workspace = true
 bevy_asset.workspace = true
 bevy_ecs.workspace = true

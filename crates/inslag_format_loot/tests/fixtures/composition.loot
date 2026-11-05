@@ -4,7 +4,7 @@ table "forest-encounter" using=actor role=member
   choose rolls=2 distinct=true
     #green-escort selected=$leader weight=3
     #violet-escort selected=$leader
-    all when=$ambush
+    all when="ambush"
       @actor definition=amber_slime
       nothing
 

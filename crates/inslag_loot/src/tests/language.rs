@@ -230,7 +230,7 @@ fn table_inputs_are_explicit_and_inferred_from_argument_references() {
 
 #[test]
 fn guards_zero_weights_and_zero_rolls_only_change_the_bag() {
-    let source = "table \"root\"\n  choose rolls=20\n    1 when=$enabled\n    2 when=!$enabled\n    3 weight=0\n  choose rolls=0\n    @sample name=never\n";
+    let source = "table \"root\"\n  choose rolls=20\n    1 when=\"enabled\"\n    2 when=\"not enabled\"\n    3 weight=0\n  choose rolls=0\n    @sample name=never\n";
     for (enabled, expected) in [(true, 1), (false, 2)] {
         let (values, calls) = run(
             source,
@@ -246,6 +246,103 @@ fn guards_zero_weights_and_zero_rolls_only_change_the_bag() {
         0,
     );
     assert!(values.is_empty() && calls.is_empty());
+}
+
+#[test]
+fn luau_guards_read_inputs_aliases_and_builtins_before_weighted_sampling() {
+    let source = "table \"root\"\n  2 as=minimum\n  choose rolls=200\n    10 weight=999 when=\"values[1] > minimum\"\n    20 when=\"math.floor(score) == minimum and not enabled\"\n";
+    let catalog = compile(source);
+    assert_eq!(
+        catalog.required_inputs("root").unwrap().collect::<Vec<_>>(),
+        ["enabled", "score", "values"]
+    );
+    let inputs = BTreeMap::from([
+        ("values".into(), Value::from(vec![1i64.into()])),
+        ("score".into(), 2.9.into()),
+        ("enabled".into(), false.into()),
+    ]);
+    let (values, calls) = run(source, inputs.clone(), 32);
+    assert!(calls.is_empty());
+    assert_eq!(values[0], 2i64.into());
+    assert_eq!(values[1..], vec![Value::Integer(20); 200]);
+    assert_eq!(values, run(source, inputs, 32).0);
+}
+
+#[test]
+fn luau_guards_use_truthiness_and_support_functions_and_records() {
+    let source = "table \"root\"\n  1 when=\"(function() for _, v in rows do if v.stage ~= 'complete' then return false end end return true end)()\"\n  2 when=0\n  3 when=\"nil\"\n  4 when=false\n";
+    let row = inslag_luau::LuauValue::Record(BTreeMap::from([(
+        "stage".into(),
+        inslag_luau::LuauValue::String("complete".into()),
+    )]));
+    let inputs = BTreeMap::from([(
+        "rows".into(),
+        Value::from(inslag_luau::LuauValue::Sequence(vec![row])),
+    )]);
+    assert_eq!(run(source, inputs, 0).0, [1i64.into(), 2i64.into()]);
+}
+
+#[test]
+fn luau_guard_failures_have_source_locations_and_do_not_allow_mutation_or_randomness() {
+    for (source, input) in [
+        ("rows[1] = 2; return true", true),
+        ("return math.random() > 0", false),
+        ("while true do end", false),
+        ("leaked = 1; return true", false),
+    ] {
+        let text = format!("table \"root\"\n  1 when=\"(function() {source} end)()\"\n");
+        let catalog = compile(&text);
+        let inputs = catalog
+            .required_inputs("root")
+            .unwrap()
+            .map(|name| {
+                (
+                    name.to_owned(),
+                    if input {
+                        Value::from(vec![1i64.into()])
+                    } else {
+                        1i64.into()
+                    },
+                )
+            })
+            .collect();
+        let error = Session::new(catalog, "root", inputs, 0)
+            .unwrap()
+            .advance()
+            .unwrap_err();
+        let error = error.to_string();
+        assert!(error.contains("test.loot:2:"), "{error}");
+        assert!(error.contains("when expression failed"), "{error}");
+    }
+    for source in [
+        "table \"root\"\n  1 when=\"later > 0\"\n  2 as=later\n",
+        "table \"root\"\n  all\n    2 as=inner\n  1 when=\"inner > 0\"\n",
+    ] {
+        assert!(error(source).message.contains("not available"));
+    }
+    assert!(
+        error("table \"root\"\n  1 when=$enabled\n")
+            .message
+            .contains("invalid when expression")
+    );
+}
+
+#[test]
+fn opaque_guard_dependencies_fail_but_unreferenced_native_data_does_not() {
+    let catalog =
+        compile("table \"root\"\n  @sample name=alpha as=actor\n  1 when=\"actor ~= nil\"\n");
+    let mut session = Session::new(catalog, "root", BTreeMap::new(), 0).unwrap();
+    assert!(matches!(session.advance().unwrap(), Step::Call(_)));
+    session
+        .resume(Ok(vec![Reference::new("sample", 1).into()]))
+        .unwrap();
+    assert!(session.advance().unwrap_err().message.contains("opaque"));
+    let (_, calls) = run(
+        "table \"root\"\n  @sample name=alpha as=actor\n  1 when=\"true\"\n",
+        BTreeMap::new(),
+        0,
+    );
+    assert_eq!(calls.len(), 1);
 }
 
 #[test]
@@ -389,7 +486,10 @@ fn invalid_runtime_metadata_is_rejected_during_lowering() {
             "table \"root\"\n  choose rolls=false\n    1",
             "expects Integer",
         ),
-        ("table \"root\"\n  1 when=42", "expects Boolean"),
+        (
+            "table \"root\"\n  1 when=\"invalid +\"",
+            "invalid when expression",
+        ),
     ];
     for (source, expected) in cases {
         let error = error(source);

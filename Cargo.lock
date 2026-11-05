@@ -3442,6 +3442,7 @@ dependencies = [
  "fastrand",
  "inslag_format_loot",
  "inslag_loot_macros",
+ "inslag_luau",
  "tempfile",
  "thiserror 2.0.21",
 ]

@@ -44,6 +44,8 @@ type PureGenerator =
 
 mod function;
 pub use function::LootFunction;
+mod reference_context;
+pub use reference_context::LootReferenceContext;
 
 fn typed_signature<A: LootArgs, R: LootReturn>() -> FunctionSignature {
     let mut signature = A::signature();
@@ -151,6 +153,12 @@ impl LootRegistry {
 
 /// Loot registration for Bevy apps.
 pub trait LootAppExt {
+    /// The reader borrows read-only Bevy parameters only while a guard is evaluated.
+    fn add_loot_context<M>(
+        &mut self,
+        name: &str,
+        reader: impl LootReferenceContext<M>,
+    ) -> &mut Self;
     /// Registers a loot function under the name used to call it in `.loot` files.
     ///
     /// # Panics
@@ -169,6 +177,14 @@ pub trait LootAppExt {
 }
 
 impl LootAppExt for App {
+    fn add_loot_context<M>(
+        &mut self,
+        name: &str,
+        reader: impl LootReferenceContext<M>,
+    ) -> &mut Self {
+        reference_context::register(self, name, reader);
+        self
+    }
     fn add_loot_function<M>(&mut self, name: &str, generator: impl LootFunction<M>) -> &mut Self {
         function::register(self, name, generator);
         self
@@ -441,6 +457,7 @@ pub struct LootRequest<T: LootOutput> {
     inputs: BTreeMap<String, Value>,
     seed: u64,
     owner: Option<Entity>,
+    context: Option<String>,
     #[cfg(test)]
     catalog: Option<Arc<Catalog>>,
     marker: std::marker::PhantomData<fn() -> T>,
@@ -459,6 +476,7 @@ impl<T: LootOutput> LootRequest<T> {
             inputs: BTreeMap::new(),
             seed: fastrand::u64(..),
             owner: None,
+            context: None,
             #[cfg(test)]
             catalog: None,
             marker: std::marker::PhantomData,
@@ -482,6 +500,12 @@ impl<T: LootOutput> LootRequest<T> {
     /// Attaches an entity to [`LootFinished::owner`] without validating that it exists.
     pub fn owner(mut self, owner: Entity) -> Self {
         self.owner = Some(owner);
+        self
+    }
+
+    /// Nested tables share this reference reader; no context data is added to the bag.
+    pub fn context(mut self, context: impl Into<String>) -> Self {
+        self.context = Some(context.into());
         self
     }
 
@@ -574,6 +598,7 @@ fn relay_requests<T: LootOutput>(
                 inputs: request.inputs.clone(),
                 seed: request.seed,
                 owner: request.owner,
+                context: request.context.clone(),
                 #[cfg(test)]
                 catalog: request.catalog.clone(),
                 marker: std::marker::PhantomData,
@@ -621,11 +646,24 @@ struct NativeResult {
     token: Token,
     generated: Result<Vec<Value>, String>,
 }
+#[derive(Message)]
+struct ContextCall {
+    id: RollId,
+    epoch: usize,
+    name: String,
+}
+
+#[derive(Resource, Default)]
+struct ContextRegistrations(std::collections::HashSet<String>);
+
 struct Run {
     session: Session,
     owner: Option<Entity>,
     waiting: usize,
     output_type: TypeId,
+    context: Option<String>,
+    context_epoch: usize,
+    awaiting_context: bool,
 }
 #[derive(Resource, Default)]
 struct Runtime {
@@ -675,14 +713,16 @@ impl Plugin for LootPlugin {
             app.world().contains_resource::<bevy_asset::AssetServer>(),
             "LootPlugin requires AssetPlugin first"
         );
-        app.init_resource::<LootRegistry>();
-        app.init_asset::<LootSource>()
+        app.init_resource::<LootRegistry>()
+            .init_resource::<ContextRegistrations>()
+            .init_asset::<LootSource>()
             .init_asset_loader::<LootLoader>()
             .init_resource::<Runtime>()
             .add_message::<NativeRequest>()
             .add_message::<NativeFinished>()
             .add_message::<NativeCall>()
             .add_message::<NativeResult>()
+            .add_message::<ContextCall>()
             .configure_sets(
                 PostUpdate,
                 (LootSet::Evaluate, LootSet::Generate, LootSet::Publish).chain(),
@@ -710,6 +750,7 @@ struct Ingress<'w, 's> {
     results: MessageReader<'w, 's, NativeResult>,
     finished: MessageWriter<'w, NativeFinished>,
     native: MessageWriter<'w, NativeCall>,
+    contexts: MessageWriter<'w, ContextCall>,
 }
 
 fn drive(
@@ -718,6 +759,7 @@ fn drive(
     registry: Res<LootRegistry>,
     sources: Res<Sources>,
     mut output_validation: Local<OutputValidationCache>,
+    contexts: Res<ContextRegistrations>,
 ) {
     for result in ingress.results.read() {
         if !runtime.current(result.token) {
@@ -735,6 +777,7 @@ fn drive(
                 &registry,
                 &mut ingress.native,
                 &mut ingress.finished,
+                &mut ingress.contexts,
             ),
             Err(error) => finish(result.token.roll, run, Err(error), &mut ingress.finished),
         }
@@ -747,6 +790,7 @@ fn drive(
                 inputs: native.request.inputs.clone(),
                 seed: native.request.seed,
                 owner: native.request.owner,
+                context: native.request.context.clone(),
                 #[cfg(test)]
                 catalog: native.request.catalog.clone(),
                 marker: std::marker::PhantomData,
@@ -778,6 +822,13 @@ fn drive(
         };
         let session = catalog
             .and_then(|catalog| {
+                if let Some(context) = &request.context
+                    && !contexts.0.contains(context)
+                {
+                    return Err(LootError::request(format!(
+                        "unknown loot context {context:?}"
+                    )));
+                }
                 output_validation.validate(
                     &catalog,
                     &request.table,
@@ -800,11 +851,15 @@ fn drive(
                     owner: request.owner,
                     waiting: 0,
                     output_type: native.output_type,
+                    context: request.context.clone(),
+                    context_epoch: 0,
+                    awaiting_context: false,
                 },
                 &mut runtime,
                 &registry,
                 &mut ingress.native,
                 &mut ingress.finished,
+                &mut ingress.contexts,
             ),
             Err(error) => {
                 ingress.finished.write(NativeFinished {
@@ -829,9 +884,33 @@ fn advance(
     registry: &LootRegistry,
     native: &mut MessageWriter<NativeCall>,
     finished: &mut MessageWriter<NativeFinished>,
+    contexts: &mut MessageWriter<ContextCall>,
+) {
+    if let Some(name) = &run.context {
+        run.context_epoch += 1;
+        run.awaiting_context = true;
+        contexts.write(ContextCall {
+            id,
+            epoch: run.context_epoch,
+            name: name.clone(),
+        });
+        runtime.runs.insert(id, run);
+    } else {
+        advance_with(id, run, runtime, registry, native, finished, None);
+    }
+}
+
+fn advance_with(
+    id: RollId,
+    mut run: Run,
+    runtime: &mut Runtime,
+    registry: &LootRegistry,
+    native: &mut MessageWriter<NativeCall>,
+    finished: &mut MessageWriter<NativeFinished>,
+    reader: Option<&crate::session::ReferenceReader<'_>>,
 ) {
     loop {
-        let call = match run.session.advance() {
+        let call = match run.session.advance_with(reader) {
             Ok(Step::Call(call)) => call,
             Ok(Step::Finished(generated)) => {
                 finish(id, run, Ok(generated), finished);

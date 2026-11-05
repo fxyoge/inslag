@@ -269,6 +269,11 @@ impl FromLootValue for Value {
         Ok(value)
     }
 }
+impl FromLootValue for inslag_luau::LuauValue {
+    fn from_loot_value(value: Value) -> Result<Self, String> {
+        value.to_luau()
+    }
+}
 impl FromLootValue for String {
     fn from_loot_value(value: Value) -> Result<Self, String> {
         if let Value::String(value) = value {

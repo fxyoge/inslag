@@ -1,5 +1,7 @@
+use inslag_luau::LuauValue;
 use std::{
     any::{Any, TypeId, type_name},
+    collections::BTreeMap,
     fmt::{self, Debug},
     sync::Arc,
 };
@@ -77,6 +79,8 @@ impl Reference {
 /// A value exchanged between loot expressions and native generators.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
+    /// An absent Luau value.
+    Nil,
     /// A truth value.
     Boolean(bool),
     /// A signed whole number.
@@ -89,6 +93,8 @@ pub enum Value {
     Reference(Reference),
     /// An ordered collection of loot values.
     List(Arc<[Value]>),
+    /// String-keyed fields accessible to Luau guards.
+    Record(Arc<BTreeMap<String, Value>>),
     /// Opaque Rust data produced by a native generator.
     Data(Data),
 }
@@ -98,6 +104,8 @@ pub enum Value {
 pub enum ValueType {
     /// Any valid loot value.
     Any,
+    /// An absent Luau value.
+    Nil,
     /// Any of the listed types.
     OneOf(Arc<[ValueType]>),
     /// Boolean values only.
@@ -123,6 +131,8 @@ pub enum ValueType {
     Reference(Arc<str>),
     /// Lists whose elements all satisfy the given type.
     List(Box<ValueType>),
+    /// Records whose fields all satisfy the given type.
+    Record(Box<ValueType>),
     /// Opaque Rust data matched by its concrete type.
     Data {
         /// Concrete Rust type used for matching.
@@ -150,8 +160,40 @@ impl Value {
         match self {
             Self::Number(value) => value.is_finite(),
             Self::List(values) => values.iter().all(Self::is_valid),
+            Self::Record(values) => values.values().all(Self::is_valid),
             _ => true,
         }
+    }
+
+    pub(crate) fn to_luau(&self) -> Result<LuauValue, String> {
+        Ok(match self {
+            Self::Nil => LuauValue::Nil,
+            Self::Boolean(value) => LuauValue::Boolean(*value),
+            Self::Integer(value) => LuauValue::Integer(*value),
+            Self::Number(value) => LuauValue::Number(*value),
+            Self::String(value) => LuauValue::String(value.to_string()),
+            Self::List(values) => {
+                LuauValue::Sequence(values.iter().map(Self::to_luau).collect::<Result<_, _>>()?)
+            }
+            Self::Record(values) => LuauValue::Record(
+                values
+                    .iter()
+                    .map(|(key, value)| Ok((key.clone(), value.to_luau()?)))
+                    .collect::<Result<_, String>>()?,
+            ),
+            Self::Reference(_) => {
+                return Err(
+                    "references are opaque in when expressions; pass the required values as inputs"
+                        .into(),
+                );
+            }
+            Self::Data(_) => {
+                return Err(
+                    "Rust data is opaque in when expressions; pass the required values as inputs"
+                        .into(),
+                );
+            }
+        })
     }
 }
 
@@ -178,6 +220,7 @@ impl ValueType {
                 Self::IntegerRange { min, max },
             ) => left_min <= min && max <= left_max,
             (Self::List(left), Self::List(right)) => left.contains(right),
+            (Self::Record(left), Self::Record(right)) => left.contains(right),
             _ => self == other,
         }
     }
@@ -205,7 +248,8 @@ impl ValueType {
         match (self, value) {
             (Self::Any, _) => true,
             (Self::OneOf(types), _) => types.iter().any(|ty| ty.accepts(value)),
-            (Self::Boolean, Value::Boolean(_))
+            (Self::Nil, Value::Nil)
+            | (Self::Boolean, Value::Boolean(_))
             | (Self::Integer, Value::Integer(_))
             | (Self::Number, Value::Integer(_) | Value::Number(_))
             | (Self::String, Value::String(_)) => true,
@@ -218,6 +262,9 @@ impl ValueType {
             (Self::AnyReference, Value::Reference(_)) => true,
             (Self::Reference(kind), Value::Reference(reference)) => *kind == reference.kind,
             (Self::List(element), Value::List(values)) => values.iter().all(|v| element.accepts(v)),
+            (Self::Record(element), Value::Record(values)) => {
+                values.values().all(|v| element.accepts(v))
+            }
             (Self::Data { id, .. }, Value::Data(data)) => *id == data.type_id(),
             _ => false,
         }
@@ -262,5 +309,24 @@ impl From<Reference> for Value {
 impl From<Vec<Value>> for Value {
     fn from(v: Vec<Value>) -> Self {
         Self::List(v.into())
+    }
+}
+
+impl From<LuauValue> for Value {
+    fn from(value: LuauValue) -> Self {
+        match value {
+            LuauValue::Nil => Self::Nil,
+            LuauValue::Boolean(value) => Self::Boolean(value),
+            LuauValue::Integer(value) => Self::Integer(value),
+            LuauValue::Number(value) => Self::Number(value),
+            LuauValue::String(value) => Self::from(value),
+            LuauValue::Sequence(values) => Self::List(values.into_iter().map(Self::from).collect()),
+            LuauValue::Record(values) => Self::Record(Arc::new(
+                values
+                    .into_iter()
+                    .map(|(key, value)| (key, Self::from(value)))
+                    .collect(),
+            )),
+        }
     }
 }

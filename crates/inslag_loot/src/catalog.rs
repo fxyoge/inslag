@@ -1,10 +1,10 @@
 use crate::error::SourceMap;
-use crate::program::{Entry, EntryKind, Expression, Table};
+use crate::program::{Entry, EntryKind, Expression, Guard, Table};
 use crate::{FunctionSignature, FunctionSignatures, LootError, LootOutput, Value, ValueType};
 use inslag_format_loot as syntax;
+use inslag_luau::EnvironmentSpec;
 use std::collections::{BTreeMap, BTreeSet};
-#[cfg(test)]
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 #[derive(Clone, Debug)]
 pub(crate) struct SourceDocument {
@@ -329,9 +329,24 @@ fn lower_entries(
             .condition
             .map(|condition| {
                 let location = source.location(condition.span.start);
-                let expression = lower_expression(condition);
-                validate_expression_type(&expression, &ValueType::Boolean, &location)?;
-                Ok(expression)
+                let expression = guard_environment()
+                    .compile(&condition.value, true)
+                    .map_err(|error| {
+                        LootError::new(
+                            location.clone(),
+                            format!("invalid when expression: {error}"),
+                        )
+                    })?;
+                Ok(Guard {
+                    inputs: expression
+                        .dependencies
+                        .iter()
+                        .filter(|name| !guard_environment().is_builtin(name))
+                        .cloned()
+                        .collect(),
+                    expression: Arc::new(expression),
+                    location,
+                })
             })
             .transpose()?;
         let kind = match entry.kind {
@@ -461,6 +476,26 @@ fn lower_count(
     Ok(expression)
 }
 
+fn guard_environment() -> &'static EnvironmentSpec {
+    static ENVIRONMENT: OnceLock<EnvironmentSpec> = OnceLock::new();
+    ENVIRONMENT.get_or_init(|| {
+        EnvironmentSpec::builder()
+            .globals([
+                "assert", "error", "ipairs", "pairs", "next", "select", "tonumber", "tostring",
+                "type", "typeof",
+            ])
+            .library("math", &["random", "randomseed"])
+            .library("string", &[])
+            .library("table", &[])
+            .library("utf8", &[])
+            .library("bit32", &[])
+            .map()
+            .read_only(true)
+            .build()
+            .expect("valid loot guard environment")
+    })
+}
+
 fn lower_arguments(arguments: Vec<syntax::Argument>) -> BTreeMap<String, Expression> {
     arguments
         .into_iter()
@@ -552,7 +587,6 @@ fn infer_inputs(
 ) -> Result<(), LootError> {
     for entry in entries {
         let mut expressions = vec![&entry.weight];
-        expressions.extend(entry.condition.iter());
         match &entry.kind {
             EntryKind::Value(value) => expressions.push(value),
             EntryKind::Call { arguments, .. } | EntryKind::Table { arguments, .. } => {
@@ -561,10 +595,15 @@ fn infer_inputs(
             EntryKind::Choose { rolls, .. } => expressions.push(rolls),
             _ => {}
         }
-        for expression in expressions {
-            if let Some(name) = expression.variable()
-                && !locals.contains(name)
-            {
+        let variables = expressions
+            .iter()
+            .filter_map(|expression| expression.variable());
+        let guard_variables = entry
+            .condition
+            .iter()
+            .flat_map(|guard| guard.inputs.iter().map(String::as_str));
+        for name in variables.chain(guard_variables) {
+            if !locals.contains(name) {
                 if declarations.contains(name) {
                     return Err(LootError::new(
                         entry.location.clone(),

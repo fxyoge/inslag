@@ -160,6 +160,18 @@ pub enum LuauValue {
     Record(BTreeMap<String, LuauValue>),
 }
 
+/// A context read can expose another view without materializing its contents.
+pub enum ReadOnlyValue {
+    Value(LuauValue),
+    View,
+}
+
+/// Borrowed application data, scoped to one expression evaluation.
+pub trait ReadOnlyContext {
+    fn read(&self, path: &[LuauValue]) -> Result<ReadOnlyValue, Error>;
+    fn len(&self, path: &[LuauValue]) -> Result<usize, Error>;
+}
+
 /// An expression ready to evaluate repeatedly with different inputs.
 ///
 /// Create one with [`EnvironmentSpec::compile`] or
@@ -186,6 +198,10 @@ pub struct CompiledLuauExpression {
 }
 
 impl CompiledLuauExpression {
+    /// Context borrows and callbacks cannot outlive this call, including on errors.
+    pub fn evaluate_context(&self, context: &dyn ReadOnlyContext) -> Result<LuauValue, Error> {
+        WORKER.with_borrow_mut(|worker| worker.evaluate_context(self, context))
+    }
     /// Whether this expression has a native fast path.
     ///
     /// This does not guarantee VM-free evaluation: unresolved roots, for example,
@@ -497,6 +513,36 @@ impl LuauWorker {
         from_lua(value, &mut Conversion::new(), 0)
     }
 
+    fn evaluate_context(
+        &mut self,
+        expression: &CompiledLuauExpression,
+        context: &dyn ReadOnlyContext,
+    ) -> Result<LuauValue, Error> {
+        self.interrupts.set(0);
+        let (function, environment) = self.function(expression)?;
+        self.lua.scope(|scope| {
+            environment.set_readonly(false);
+            environment.clear()?;
+            let result = (|| {
+                for name in &expression.dependencies {
+                    if !expression.environment.is_builtin(name) {
+                        let path = vec![LuauValue::String(name.clone())];
+                        environment.raw_set(
+                            name.as_str(),
+                            context_value(&self.lua, scope, context, path)?,
+                        )?;
+                    }
+                }
+                environment.set_readonly(true);
+                from_lua(function.call(())?, &mut Conversion::new(), 0)
+            })();
+            environment.set_readonly(false);
+            environment.clear()?;
+            environment.set_readonly(true);
+            result
+        })
+    }
+
     fn function(
         &mut self,
         expression: &CompiledLuauExpression,
@@ -547,14 +593,78 @@ impl LuauWorker {
     }
 }
 
-fn freeze(value: &Value) -> Result<(), Error> {
-    if let Value::Table(table) = value {
-        for pair in table.pairs::<Value, Value>() {
-            freeze(&pair?.1)?;
+fn context_value<'scope, 'env: 'scope>(
+    lua: &Lua,
+    scope: &'scope mlua::Scope<'scope, 'env>,
+    context: &'env dyn ReadOnlyContext,
+    path: Vec<LuauValue>,
+) -> Result<Value, Error> {
+    match context.read(&path)? {
+        ReadOnlyValue::Value(value) => {
+            let value = to_lua(lua, &value)?;
+            freeze(&value)?;
+            Ok(value)
         }
-        table.set_readonly(true);
+        ReadOnlyValue::View => {
+            let view = lua.create_table()?;
+            let metatable = lua.create_table()?;
+            let index_path = path.clone();
+            metatable.raw_set(
+                "__index",
+                scope.create_function(move |lua, (_, key): (Value, Value)| {
+                    let key = match from_lua(key, &mut Conversion::new(), 0)? {
+                        LuauValue::Number(value)
+                            if value.is_finite()
+                                && value.fract() == 0.
+                                && value >= i64::MIN as f64
+                                && value < -(i64::MIN as f64) =>
+                        {
+                            LuauValue::Integer(value as i64)
+                        }
+                        key => key,
+                    };
+                    if !matches!(key, LuauValue::String(_) | LuauValue::Integer(_)) {
+                        return Err(Error::runtime("context keys must be strings or integers"));
+                    }
+                    let mut path = index_path.clone();
+                    path.push(key);
+                    context_value(lua, scope, context, path)
+                })?,
+            )?;
+            let length_path = path.clone();
+            metatable.raw_set(
+                "__len",
+                scope.create_function(move |_, ()| context.len(&length_path))?,
+            )?;
+            metatable.raw_set(
+                "__iter",
+                scope.create_function(move |_, ()| {
+                    let length = context.len(&path)?;
+                    let path = path.clone();
+                    let iterator =
+                        scope.create_function(move |lua, (_, previous): (Value, usize)| {
+                            let index = previous + 1;
+                            if index > length {
+                                return Ok((Value::Nil, Value::Nil));
+                            }
+                            let mut path = path.clone();
+                            path.push(LuauValue::Integer(index as i64));
+                            Ok((
+                                Value::Integer(index as i64),
+                                context_value(lua, scope, context, path)?,
+                            ))
+                        })?;
+                    Ok((iterator, Value::Nil, 0usize))
+                })?,
+            )?;
+            metatable.raw_set("__metatable", false)?;
+            metatable.raw_set("__inslag_read_only_view", true)?;
+            metatable.set_readonly(true);
+            view.set_metatable(Some(metatable))?;
+            view.set_readonly(true);
+            Ok(Value::Table(view))
+        }
     }
-    Ok(())
 }
 
 // Strings have Luau's standard string-library __index behavior. Delegate this
@@ -594,6 +704,16 @@ fn to_lua(lua: &Lua, value: &LuauValue) -> Result<Value, Error> {
             Value::Table(table)
         }
     })
+}
+
+fn freeze(value: &Value) -> Result<(), Error> {
+    if let Value::Table(table) = value {
+        for pair in table.pairs::<Value, Value>() {
+            freeze(&pair?.1)?;
+        }
+        table.set_readonly(true);
+    }
+    Ok(())
 }
 
 struct Conversion {
@@ -643,6 +763,15 @@ fn from_lua(value: Value, conversion: &mut Conversion, depth: usize) -> Result<L
 }
 
 fn from_table(table: Table, conversion: &mut Conversion, depth: usize) -> Result<LuauValue, Error> {
+    if table.metatable().is_some_and(|metatable| {
+        metatable
+            .raw_get::<bool>("__inslag_read_only_view")
+            .unwrap_or(false)
+    }) {
+        return Err(Error::runtime(
+            "read-only context views cannot escape evaluation",
+        ));
+    }
     if !conversion.seen_tables.insert(table.to_pointer() as usize) {
         return Err(Error::runtime(
             "shared or cyclic Luau tables cannot be persisted",
@@ -685,6 +814,125 @@ fn from_table(table: Table, conversion: &mut Conversion, depth: usize) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct Live<'a> {
+        quality: &'a Cell<i64>,
+        reads: &'a RefCell<Vec<Vec<LuauValue>>>,
+    }
+
+    impl ReadOnlyContext for Live<'_> {
+        fn read(&self, path: &[LuauValue]) -> Result<ReadOnlyValue, Error> {
+            self.reads.borrow_mut().push(path.to_vec());
+            let names: Vec<_> = path
+                .iter()
+                .filter_map(|key| match key {
+                    LuauValue::String(name) => Some(name.as_str()),
+                    _ => None,
+                })
+                .collect();
+            Ok(match names.as_slice() {
+                ["document"] | ["document", "work"] | ["members"] | ["members", "work"] => {
+                    ReadOnlyValue::View
+                }
+                ["document", "work", "quality"] | ["members", "work", "quality"] => {
+                    ReadOnlyValue::Value(LuauValue::Integer(self.quality.get()))
+                }
+                _ => ReadOnlyValue::Value(LuauValue::Nil),
+            })
+        }
+        fn len(&self, path: &[LuauValue]) -> Result<usize, Error> {
+            if path == [LuauValue::String("members".into())] {
+                Ok(2)
+            } else {
+                Err(Error::runtime("not a sequence"))
+            }
+        }
+    }
+
+    #[test]
+    fn live_views_read_only_the_accessed_fields_and_do_not_capture_their_values() {
+        let spec = EnvironmentSpec::builder().read_only(true).build().unwrap();
+        let quality = Cell::new(2);
+        let reads = RefCell::new(Vec::new());
+        let context = Live {
+            quality: &quality,
+            reads: &reads,
+        };
+        let expression = spec
+            .compile("document.work.quality > 0 or document.unused", true)
+            .unwrap();
+        assert_eq!(
+            expression.evaluate_context(&context).unwrap(),
+            LuauValue::Boolean(true)
+        );
+        assert!(
+            !reads
+                .borrow()
+                .iter()
+                .any(|path| path.contains(&LuauValue::String("unused".into())))
+        );
+        quality.set(-1);
+        assert_eq!(
+            expression.evaluate_context(&context).unwrap(),
+            LuauValue::Boolean(false)
+        );
+        assert!(
+            reads
+                .borrow()
+                .iter()
+                .any(|path| path.contains(&LuauValue::String("unused".into())))
+        );
+    }
+
+    #[test]
+    fn live_sequences_support_general_iteration() {
+        let spec = EnvironmentSpec::builder().read_only(true).build().unwrap();
+        let quality = Cell::new(2);
+        let reads = RefCell::new(Vec::new());
+        let context = Live {
+            quality: &quality,
+            reads: &reads,
+        };
+        let source = "(function() local sum = 0 for _, d in members do sum += d.work.quality end return sum == 4 end)()";
+        assert_eq!(
+            spec.compile(source, true)
+                .unwrap()
+                .evaluate_context(&context)
+                .unwrap(),
+            LuauValue::Boolean(true)
+        );
+    }
+
+    #[test]
+    fn live_views_are_immutable_cannot_escape_and_are_cleared_after_errors() {
+        let spec = EnvironmentSpec::builder().read_only(true).build().unwrap();
+        let quality = Cell::new(2);
+        let reads = RefCell::new(Vec::new());
+        let context = Live {
+            quality: &quality,
+            reads: &reads,
+        };
+        let mutation = spec
+            .compile(
+                "(function() document.work.quality = 99 return true end)()",
+                true,
+            )
+            .unwrap();
+        assert!(mutation.evaluate_context(&context).is_err());
+        assert_eq!(quality.get(), 2);
+        let view = spec.compile("document", false).unwrap();
+        assert!(
+            view.evaluate_context(&context)
+                .unwrap_err()
+                .to_string()
+                .contains("cannot escape")
+        );
+        assert_eq!(
+            view.evaluate_borrowed(&[("document", &LuauValue::Integer(7))])
+                .unwrap(),
+            LuauValue::Integer(7)
+        );
+    }
 
     #[test]
     fn shared_namespace_survives_function_eviction_without_sharing_input_tables() {

@@ -2,6 +2,13 @@ use crate::{SourceLocation, Value};
 use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Clone, Debug)]
+pub(crate) struct Guard {
+    pub expression: Arc<inslag_luau::CompiledLuauExpression>,
+    pub inputs: Vec<String>,
+    pub location: SourceLocation,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) enum Expression {
     Literal(Value),
     Variable(String),
@@ -23,7 +30,7 @@ pub(crate) struct Entry {
     pub location: SourceLocation,
     pub kind: EntryKind,
     pub binding: Option<String>,
-    pub condition: Option<Expression>,
+    pub condition: Option<Guard>,
     pub weight: Expression,
 }
 

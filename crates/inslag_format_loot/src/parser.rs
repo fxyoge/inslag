@@ -434,7 +434,18 @@ impl DocumentParser<'_> {
             })
             .transpose()?;
         let condition = remove(&mut attrs, "when")
-            .map(|attribute| expression(attribute.value))
+            .map(|attribute| {
+                let token = attribute.value;
+                let value = if token.text.starts_with(['\'', '"']) {
+                    unquote(&token)?
+                } else {
+                    token.text.to_owned()
+                };
+                Ok(Spanned {
+                    value,
+                    span: token.span,
+                })
+            })
             .transpose()?;
         let weight = remove(&mut attrs, "weight")
             .map(|attribute| {
