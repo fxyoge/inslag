@@ -105,6 +105,53 @@ jobs:
         $code = $LASTEXITCODE
         "exit_code=$code" | Tee-Object -Append diagnostics/isolated.log
         exit $code
+    - name: Run serially without the earlier audio composition
+      id: without_audio_composition
+      if: ${{ !cancelled() && steps.parallel.outcome != 'skipped' }}
+      continue-on-error: true
+      timeout-minutes: 5
+      run: |
+        $PSNativeCommandUseErrorActionPreference = $false
+        & $env:E2E_TEST_EXE --nocapture --test-threads=1 --skip platform::tests::production_audio_composition_builds_and_updates_headlessly 2>&1 | Tee-Object diagnostics/without-audio-composition.log
+        $code = $LASTEXITCODE
+        "exit_code=$code" | Tee-Object -Append diagnostics/without-audio-composition.log
+        exit $code
+    - name: Install ProcDump
+      if: ${{ !cancelled() && steps.parallel.outcome != 'skipped' }}
+      run: |
+        $archive = Join-Path $env:RUNNER_TEMP Procdump.zip
+        $tools = Join-Path $env:RUNNER_TEMP procdump
+        Invoke-WebRequest https://download.sysinternals.com/files/Procdump.zip -OutFile $archive
+        Expand-Archive $archive -DestinationPath $tools -Force
+        $exe = Join-Path $tools procdump64.exe
+        $signature = Get-AuthenticodeSignature $exe
+        $signature | Format-List Status, StatusMessage, SignerCertificate | Out-File diagnostics/procdump-signature.log
+        if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation(?:,|$)') {
+          throw 'ProcDump must have a valid Microsoft signature'
+        }
+        Get-FileHash $exe | Format-List | Out-File diagnostics/procdump-hash.log
+        "PROCDUMP_EXE=$exe" >> $env:GITHUB_ENV
+    - name: Capture the serial crash directly under ProcDump
+      id: procdump
+      if: ${{ !cancelled() && env.PROCDUMP_EXE != '' }}
+      continue-on-error: true
+      timeout-minutes: 5
+      run: |
+        $PSNativeCommandUseErrorActionPreference = $false
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+          $dumps = New-Item -ItemType Directory -Force "diagnostics/dumps/procdump-$attempt"
+          $log = "diagnostics/procdump-$attempt.log"
+          # WER produced no dump; catch access violations before any crash handler can consume them.
+          & $env:PROCDUMP_EXE -accepteula -ma -e 1 -f C0000005 -x $dumps.FullName $env:E2E_TEST_EXE --nocapture --test-threads=1 2>&1 | Tee-Object $log
+          $code = $LASTEXITCODE
+          "procdump_exit_code=$code" | Tee-Object -Append $log
+          if (Get-ChildItem $dumps.FullName -Filter '*.dmp') {
+            throw 'ProcDump captured an access violation; inspect the dump and native stack log'
+          }
+          if (!(Select-String -Path $log -Pattern 'test result: ok\.' -Quiet)) {
+            throw 'ProcDump did not capture a dump or report a successful test run; inspect its log'
+          }
+        }
     - name: Collect Windows crash events
       if: always()
       run: |
@@ -125,7 +172,7 @@ jobs:
         }
         $symbols = (Resolve-Path diagnostics/symbols).Path
         $symbolCache = Join-Path $env:RUNNER_TEMP symbols
-        Get-ChildItem diagnostics/dumps -Filter '*.dmp' | ForEach-Object {
+        Get-ChildItem diagnostics/dumps -Recurse -Filter '*.dmp' | ForEach-Object {
           & $cdb -z $_.FullName -y "$symbols;srv*$symbolCache*https://msdl.microsoft.com/download/symbols" -c '!analyze -v; .ecxr; kv; ~* kb; lm; q' 2>&1 |
             Tee-Object "diagnostics/$($_.BaseName)-stack.log"
         }
@@ -152,5 +199,5 @@ jobs:
         if-no-files-found: warn
         retention-days: 7
     - name: Report diagnostic test failures
-      if: ${{ !cancelled() && (steps.parallel.outcome == 'failure' || steps.serial.outcome == 'failure' || steps.isolated.outcome == 'failure') }}
+      if: ${{ !cancelled() && (steps.parallel.outcome == 'failure' || steps.serial.outcome == 'failure' || steps.isolated.outcome == 'failure' || steps.without_audio_composition.outcome == 'failure' || steps.procdump.outcome == 'failure') }}
       run: throw 'E2E diagnostics reproduced a failure; inspect the uploaded logs and dumps.'
