@@ -1,0 +1,5 @@
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+/.bench-tmp/
+/benchmark-results/

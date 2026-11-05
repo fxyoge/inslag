@@ -78,6 +78,8 @@ jobs:
       run: cargo check --locked --workspace --benches --no-default-features
     - name: Check benchmarks (all features)
       run: cargo check --locked --workspace --benches --all-features
+    - name: Smoke-test persistence benchmarks
+      run: cargo test --locked -p inslag_persist --benches
 
   lint-quality:
     name: Dylint formatting, Clippy, and docs

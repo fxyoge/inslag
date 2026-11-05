@@ -13,6 +13,8 @@ repository = "https://github.com/fxyoge/inslag"
 [workspace.dependencies]
 inslag_format_loot = { version = "0.1.0", path = "crates/inslag_format_loot" }
 inslag_loot_macros = { version = "0.1.0", path = "crates/inslag_loot_macros" }
+inslag_persist = { version = "0.1.0", path = "crates/inslag_persist" }
+inslag_persist_macros = { version = "0.1.0", path = "crates/inslag_persist_macros" }
 winnow = "1.0"
 proptest = { version = "1", default-features = false, features = ["std"] }
 bevy_app = "0.20.0"
@@ -20,6 +22,10 @@ bevy_asset = "0.20.0"
 bevy_ecs = { version = "0.20.0", features = ["multi_threaded"] }
 bevy_reflect = "0.20.0"
 bevy_tasks = "0.20.0"
+bevy_transform = "0.20.0"
+bevy_time = { version = "0.20.0", default-features = false, features = ["std"] }
+inventory = "0.3"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 fastrand = "2"
 thiserror = "2.0"
 divan = "0.1.21"

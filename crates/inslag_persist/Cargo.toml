@@ -1,0 +1,48 @@
+[package]
+name = "inslag_persist"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Typed, benchmark-driven SQLite saves for Bevy"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+inslag_persist_macros.workspace = true
+inventory.workspace = true
+bevy_app.workspace = true
+bevy_ecs = { workspace = true, features = ["serialize"] }
+bevy_transform = { workspace = true, features = ["serialize"] }
+bevy_asset.workspace = true
+bevy_time.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+divan.workspace = true
+tempfile.workspace = true
+
+[[bench]]
+name = "snapshot"
+harness = false
+
+[[bench]]
+name = "changed"
+harness = false
+
+[[bench]]
+name = "explicit_dirty"
+harness = false
+
+[[bench]]
+name = "mixed"
+harness = false
+
+[[bench]]
+name = "lifecycle"
+harness = false
+
+[lints]
+workspace = true
