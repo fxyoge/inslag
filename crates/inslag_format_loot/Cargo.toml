@@ -1,0 +1,23 @@
+[package]
+name = "inslag_format_loot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Parser for the Loot authoring format"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+winnow.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+divan.workspace = true
+proptest.workspace = true
+
+[[bench]]
+name = "parsing"
+harness = false
+
+[lints]
+workspace = true

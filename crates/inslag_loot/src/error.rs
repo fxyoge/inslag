@@ -13,6 +13,33 @@ impl std::fmt::Display for SourceLocation {
     }
 }
 
+pub(crate) struct SourceMap<'a> {
+    name: Arc<str>,
+    text: &'a str,
+    lines: Vec<usize>,
+}
+
+impl<'a> SourceMap<'a> {
+    pub fn new(name: &str, text: &'a str) -> Self {
+        Self {
+            name: name.into(),
+            text,
+            lines: std::iter::once(0)
+                .chain(text.match_indices('\n').map(|(index, _)| index + 1))
+                .collect(),
+        }
+    }
+
+    pub fn location(&self, offset: usize) -> SourceLocation {
+        let line = self.lines.partition_point(|&start| start <= offset) - 1;
+        SourceLocation {
+            source: self.name.clone(),
+            line: line + 1,
+            column: self.text[self.lines[line]..offset].chars().count() + 1,
+        }
+    }
+}
+
 /// A loot failure whose display text includes its source location.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{location}: {message}")]

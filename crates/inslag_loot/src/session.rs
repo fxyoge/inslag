@@ -1,4 +1,4 @@
-use crate::parser::{Entry, EntryKind, Expression};
+use crate::program::{Entry, EntryKind, Expression};
 use crate::{Arguments, Catalog, LootError, SourceLocation, Value, ValueType};
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -341,7 +341,6 @@ impl Session {
                     };
                     self.push(frame)?;
                 }
-                EntryKind::Implicit { .. } => unreachable!("catalog lowers implicit calls"),
             }
         }
     }

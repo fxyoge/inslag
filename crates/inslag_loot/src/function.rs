@@ -1,10 +1,6 @@
 use crate::{LootError, Reference, SourceLocation, Value, ValueType};
 use std::collections::BTreeMap;
 
-pub(crate) const RESERVED: &[&str] = &[
-    "table", "choose", "all", "nothing", "using", "as", "weight", "when", "rolls", "distinct",
-];
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct Parameter {
     pub value_type: ValueType,
@@ -106,7 +102,7 @@ impl FunctionSignature {
 
     pub(crate) fn validate(&self) -> Result<(), String> {
         for (name, parameter) in &self.parameters {
-            if !crate::parser::valid_name(name) || RESERVED.contains(&name.as_str()) {
+            if !inslag_format_loot::is_name(name) || inslag_format_loot::is_reserved(name) {
                 return Err(format!("invalid or reserved parameter {name:?}"));
             }
             if parameter
@@ -195,7 +191,7 @@ impl FunctionSignatures {
         name: &str,
         signature: FunctionSignature,
     ) -> Result<&mut Self, String> {
-        if !crate::parser::valid_name(name) {
+        if !inslag_format_loot::is_name(name) {
             return Err(format!("invalid function name {name:?}"));
         }
         signature.validate()?;

@@ -1,0 +1,15 @@
+; Encounter composition
+table "forest-encounter" using=actor role=member
+  azure_slime role=leader as=leader
+  choose rolls=2 distinct=true
+    #green-escort selected=$leader weight=3
+    #violet-escort selected=$leader
+    all when=$ambush
+      @actor definition=amber_slime
+      nothing
+
+table "green-escort" using=actor
+  green_slime
+
+table "violet-escort" using=actor
+  violet_slime

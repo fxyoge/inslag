@@ -4,8 +4,6 @@ Asset-backed random grab bags. Author weighted choices, reusable tables, and rel
 
 Use it for loot, crafting, corruption, encounter compositions, and other situations where independent drops aren't enough.
 
-Disclaimer: this crate is not production ready. Expect breaking changes.
-
 ## Example
 
 ```text

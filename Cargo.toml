@@ -11,7 +11,10 @@ license = "MIT"
 repository = "https://github.com/fxyoge/inslag"
 
 [workspace.dependencies]
+inslag_format_loot = { version = "0.1.0", path = "crates/inslag_format_loot" }
 inslag_loot_macros = { version = "0.1.0", path = "crates/inslag_loot_macros" }
+winnow = "1.0"
+proptest = { version = "1", default-features = false, features = ["std"] }
 bevy_app = "0.20.0"
 bevy_asset = "0.20.0"
 bevy_ecs = { version = "0.20.0", features = ["multi_threaded"] }

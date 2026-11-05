@@ -6,7 +6,7 @@ mod bevy;
 mod catalog;
 mod error;
 mod function;
-mod parser;
+mod program;
 mod session;
 mod typed;
 mod value;

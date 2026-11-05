@@ -371,45 +371,25 @@ fn traces_and_cross_file_errors_keep_source_locations() {
 }
 
 #[test]
-fn malformed_syntax_and_metadata_are_rejected() {
+fn format_errors_attach_source_names_and_unicode_columns() {
+    let error = error("table \"root\"\r\n  @identity value=\"🦀\" value=2");
+    assert_eq!(error.location.source.as_ref(), "bad.loot");
+    assert_eq!(error.location.line, 2);
+    assert_eq!(error.location.column, 23);
+    assert!(error.message.contains("duplicate attribute"));
+}
+
+#[test]
+fn invalid_runtime_metadata_is_rejected_during_lowering() {
     let cases = [
-        ("", "declare a table"),
-        ("table root", "double quoted"),
-        (" table \"root\"", "column 1"),
-        ("table \"root\"\n\t1", "ASCII spaces"),
-        ("table \"root\"\n  \"unclosed", "unterminated"),
-        ("table \"root\"\n  \"x\"tail", "quoted"),
-        ("table \"root\"\n  \"a\\q\"", "escape"),
-        ("table \"root\"\n  @identity value=", "attribute"),
-        ("table \"root\"\n  @identity value=1 value=2", "duplicate"),
-        ("table \"root\"\n  choose", "child entries"),
-        ("table \"root\"\n  2\n    3", "only choose and all"),
-        ("table \"root\"\n  all\n    1\n   2", "indentation"),
-        ("table \"root\"\n  3..1", "minimum"),
-        ("table \"root\"\n  1.5..2.5", "integer endpoints"),
-        ("table \"root\"\n  NaN", "finite"),
-        ("table \"root\"\n  @identity(value=1)", "invalid function"),
-        (
-            "table \"root\"\n  @identity value=$item.mods",
-            "property traversal",
-        ),
         ("table \"root\"\n  as=x", "entry needs a value"),
-        (
-            "table \"root\"\n  choose from=$pool\n    1",
-            "unknown group attribute",
-        ),
-        ("table \"root\"\n  1 weight=2", "direct children"),
-        ("table \"root\"\n  nothing count=2", "does not accept"),
-        (
-            "table \"root\"\n  all rolls=2\n    1",
-            "only allowed on choose",
-        ),
-        (
-            "table \"root\"\n  choose distinct=maybe\n    1",
-            "true or false",
-        ),
         ("table \"root\"\n  choose rolls=-1\n    1", "negative"),
         ("table \"root\"\n  choose\n    1 weight=-1..5", "negative"),
+        (
+            "table \"root\"\n  choose rolls=false\n    1",
+            "expects Integer",
+        ),
+        ("table \"root\"\n  1 when=42", "expects Boolean"),
     ];
     for (source, expected) in cases {
         let error = error(source);
@@ -797,13 +777,7 @@ fn context_can_supply_primary_arguments_weights_and_roll_counts() {
 }
 
 #[test]
-fn parser_and_reference_depth_limits_are_bounded() {
-    let mut source = "table \"root\"\n".to_string();
-    for depth in 1..=70 {
-        source.push_str(&format!("{}all\n", "  ".repeat(depth)));
-    }
-    source.push_str(&format!("{}1\n", "  ".repeat(71)));
-    assert!(error(&source).message.contains("nesting exceeds"));
+fn reference_depth_is_bounded() {
     let mut source = String::new();
     for index in 0..260 {
         source.push_str(&format!("table \"t{index}\"\n  #t{}\n", index + 1));
