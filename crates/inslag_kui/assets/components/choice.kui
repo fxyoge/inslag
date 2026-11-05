@@ -1,0 +1,11 @@
+<component xmlns="urn:inslag-kui:1" xmlns:bind="urn:inslag-kui:binding:1" version="1" name="choice">
+  <style src="components/choice.css"/>
+  <prop name="label" type="string" default="Choose"/>
+  <prop name="value" type="scalar" default=""/>
+  <prop name="disabled" type="boolean" default="false"/>
+  <event name="activate"/>
+  <button class="choice" on-click="emit.activate" bind:value="props.value" bind:disabled="props.disabled">
+    <text bind:text="props.label"/>
+    <slot name="detail"><text class="hint">Reusable, slotted, and owner-routed</text></slot>
+  </button>
+</component>

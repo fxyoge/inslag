@@ -1,0 +1,11 @@
+<view xmlns="urn:inslag-kui:1" xmlns:bind="urn:inslag-kui:binding:1" version="1" name="interactions">
+  <node>
+    <text y="200">Hover, click, or drag the label. All behavior lives in SCXML.</text>
+    <text y="150" bind:text="status"/>
+    <text y="110" template="Local hover: {hover_x}, {hover_y} · Clicks: {clicks}"/>
+    <text id="label" cursor="grab" bind:position="position"
+          on-click="click"
+          on-hover-enter="enter" on-hover="hover" on-hover-exit="exit"
+          on-drag-start="lift" on-drag="move" on-drag-end="drop" on-drag-cancel="cancel">[ DRAG ME ]</text>
+  </node>
+</view>

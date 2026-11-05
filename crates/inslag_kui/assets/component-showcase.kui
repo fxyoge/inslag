@@ -1,0 +1,21 @@
+<view xmlns="urn:inslag-kui:1" xmlns:bind="urn:inslag-kui:binding:1" version="1" name="component-showcase">
+  <style src="component-showcase.css"/>
+  <import name="choice" src="components/choice.kui"/>
+  <import name="range" src="components/range.kui"/>
+  <node class="showcase">
+    <text class="heading">Authored components</text>
+    <use component="range">
+      <prop name="label" value="Experience"/>
+      <prop name="current" bind:value="current"/>
+      <prop name="maximum" bind:value="maximum"/>
+    </use>
+    <repeat bind:items="choices" as="choice" key="id">
+      <use component="choice">
+        <prop name="label" bind:value="choice.label"/>
+        <prop name="value" bind:value="choice.id"/>
+        <on name="activate" action="choose"/>
+        <fill slot="detail"><text class="detail" template="{caption} · {choice.label}"/></fill>
+      </use>
+    </repeat>
+  </node>
+</view>

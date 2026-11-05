@@ -1,0 +1,4 @@
+.showcase { flex-direction: column; gap: 24px; width: 420px; padding: 28px; background-color: #19211e; --ink: #f1e5c8; }
+text { color: #f1e5c8; }
+.heading { font-size: 28px; }
+.detail { font-size: 14px; color: #d0bc8a; }

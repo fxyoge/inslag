@@ -1,0 +1,12 @@
+<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:bst="urn:inslag-state-tree" datamodel="luau" initial="active">
+  <datamodel>
+    <data id="current" expr="42"/>
+    <data id="maximum" expr="100"/>
+    <data id="caption" expr="'Select'"/>
+    <data id="choices" expr="{{id='oak',label='Oak'},{id='ash',label='Ash'}}"/>
+  </datamodel>
+  <state id="active">
+    <bst:activity id="showcase" name="ui.render"><bst:arg name="src" expr="'component-showcase.kui'"/></bst:activity>
+    <transition event="ui.action"><assign location="current" expr="(current + 10) % 101"/></transition>
+  </state>
+</scxml>

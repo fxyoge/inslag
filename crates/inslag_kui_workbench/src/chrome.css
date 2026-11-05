@@ -1,0 +1,35 @@
+.workbench { width: 100%; height: 100%; display: flex; flex-direction: column; background-color: #16191d; color: #d4d8df; font-size: 12px; }
+.toolbar { height: 30px; min-height: 30px; display: flex; align-items: center; gap: 4px; padding: 3px; background-color: #242a31; }
+.body { flex-grow: 1; min-height: 0; display: flex; }
+.views { width: 180px; min-width: 90px; display: flex; flex-direction: column; padding: 4px; gap: 3px; overflow-y: scroll; background-color: #1d2228; }
+.list { display: flex; flex-direction: column; gap: 3px; }
+.preview { flex-grow: 1; min-width: 40px; min-height: 40px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.inspector { width: 340px; min-width: 180px; display: flex; flex-direction: column; padding: 4px; gap: 4px; background-color: #1d2228; }
+.splitter { width: 4px; min-width: 4px; padding: 0; background-color: #343e49; }
+.bindings { flex-grow: 1; min-height: 0; display: flex; flex-direction: column; gap: 3px; overflow-y: scroll; }
+.row { min-height: 24px; display: flex; align-items: center; gap: 3px; }
+.field { width: 0; flex-grow: 1; min-width: 20px; max-height: 100px; overflow-y: scroll; }
+.binding { display: flex; flex-direction: column; gap: 2px; padding-bottom: 5px; border-bottom: 1px solid #303740; }
+.label { color: #8dbbdd; }
+.muted { color: #929ca8; font-size: 11px; }
+.error { color: #f7a27b; font-size: 11px; }
+button { min-height: 23px; padding: 3px 5px; background-color: #303943; color: #d4d8df; }
+button:hover { background-color: #465568; }
+button[selected="true"] { background-color: #315571; }
+button.selected-story { background-color: #315571; }
+.raw { flex-grow: 1; min-height: 80px; overflow-y: scroll; }
+.raw-copy { font-size: 12px; }
+.log { height: 140px; min-height: 60px; overflow-y: scroll; }
+.status { height: 24px; min-height: 24px; padding: 3px; background-color: #242a31; }
+.native-editor {
+    position: absolute;
+    left: 16px;
+    bottom: 40px;
+    width: 50%;
+    min-height: 36px;
+    max-height: 50%;
+    padding: 8px;
+    background-color: #202632;
+    color: white;
+    font-size: 16px;
+}

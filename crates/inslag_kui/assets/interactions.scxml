@@ -1,0 +1,47 @@
+<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:bst="urn:inslag-state-tree" datamodel="luau" initial="mounted">
+  <datamodel>
+    <data id="position" expr="{x=0, y=0, z=1}"/>
+    <data id="original" expr="{x=0, y=0, z=1}"/>
+    <data id="hover_x" expr="0"/>
+    <data id="hover_y" expr="0"/>
+    <data id="clicks" expr="0"/>
+    <data id="status" expr="'Ready'"/>
+  </datamodel>
+  <state id="mounted" initial="ready">
+    <bst:activity id="view" name="ui.render">
+      <bst:arg name="src" expr="'interactions.kui'"/>
+      <bst:arg name="space" expr="'world'"/>
+    </bst:activity>
+    <transition event="ui.action" cond="_event.data.action == 'hover'">
+      <assign location="hover_x" expr="_event.data.position.x"/>
+      <assign location="hover_y" expr="_event.data.position.y"/>
+    </transition>
+    <state id="ready">
+      <transition event="ui.action" cond="_event.data.action == 'click'">
+        <assign location="clicks" expr="clicks + 1"/>
+      </transition>
+      <transition event="ui.action" cond="_event.data.action == 'enter'">
+        <assign location="status" expr="'Hovering'"/>
+      </transition>
+      <transition event="ui.action" cond="_event.data.action == 'exit'">
+        <assign location="status" expr="'Ready'"/>
+      </transition>
+      <transition event="ui.action" cond="_event.data.action == 'lift'" target="held">
+        <assign location="original" expr="position"/>
+        <assign location="status" expr="'Dragging — position is supplied by the controller'"/>
+      </transition>
+    </state>
+    <state id="held">
+      <transition event="ui.action" cond="_event.data.action == 'move' or _event.data.action == 'drop'">
+        <assign location="position" expr="{x=original.x + _event.data.position.x - _event.data.start.x, y=original.y + _event.data.position.y - _event.data.start.y, z=original.z}"/>
+      </transition>
+      <transition cond="_event.data.action == 'drop'" target="ready">
+        <assign location="status" expr="'Dropped'"/>
+      </transition>
+      <transition event="ui.action" cond="_event.data.action == 'cancel'" target="ready">
+        <assign location="position" expr="original"/>
+        <assign location="status" expr="'Cancelled'"/>
+      </transition>
+    </state>
+  </state>
+</scxml>

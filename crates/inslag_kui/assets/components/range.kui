@@ -1,0 +1,13 @@
+<component xmlns="urn:inslag-kui:1" xmlns:bind="urn:inslag-kui:binding:1" version="1" name="range">
+  <style src="components/range.css"/>
+  <prop name="label" type="string" default="Progress"/>
+  <prop name="current" type="number" default="42"/>
+  <prop name="maximum" type="number" default="100"/>
+  <node class="range">
+    <node class="range-heading">
+      <text bind:text="props.label"/>
+      <text template="{props.current:grouped} / {props.maximum:grouped}"/>
+    </node>
+    <meter bind:current="props.current" bind:maximum="props.maximum"/>
+  </node>
+</component>

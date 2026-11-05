@@ -1,0 +1,33 @@
+[package]
+name = "inslag_kui_workbench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT OR Apache-2.0"
+description = "KUI-authored standalone visual workbench for inslag_kui"
+repository.workspace = true
+
+[features]
+default = []
+aseprite = ["inslag_kui/aseprite"]
+
+[dependencies]
+bevy = { workspace = true, features = ["default_app", "ui_bevy_render", "bevy_winit", "default_font", "png", "x11", "multi_threaded", "file_watcher"] }
+bevy_flair.workspace = true
+bevy_enhanced_input.workspace = true
+inslag_kui.workspace = true
+inslag_state_tree.workspace = true
+inslag_luau.workspace = true
+serde_json.workspace = true
+arboard.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+type_complexity = "allow"
+too_many_arguments = "allow"

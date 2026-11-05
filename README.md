@@ -2,6 +2,8 @@
 
 Opinionated asset-backed game authoring for Bevy.
 
+- [inslag_kui](crates/inslag_kui/): asset-backed declarative interfaces for Bevy.
+- [inslag_kui_workbench](crates/inslag_kui_workbench/): a visual workbench for KUI assets.
 - [inslag_luau](crates/inslag_luau/): portable, compile-once Luau expressions with native fast paths.
 - [inslag_loot](crates/inslag_loot/): weighted choices, reusable tables, and relationships between generated results.
 - [inslag_persist](crates/inslag_persist/): SQLite-backed saves for Bevy.

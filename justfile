@@ -6,6 +6,7 @@ default:
   @just --list
 
 bench: \
+  _bench-kui \
   _bench-loot-execution \
   _bench-luau-expressions \
   _bench-persist \
@@ -39,9 +40,14 @@ _lint-lints:
 _lint-workspace:
     cargo fmt --all --check
     cargo clippy --locked --all-targets -- -D warnings
+    cargo clippy --locked --all-targets --all-features -- -D warnings
 
 _bench-loot-execution:
   cargo bench -p inslag_loot --bench execution
+
+_bench-kui:
+  cargo bench -p inslag_kui --bench execution
+  cargo bench -p inslag_kui --bench allocation
 
 _bench-luau-expressions:
   cargo bench -p inslag_luau --bench expressions
@@ -62,7 +68,8 @@ _test-lints:
   cargo test --locked --lib
 
 _test-workspace:
-  cargo test --workspace
+  cargo test --workspace --locked
+  cargo test --workspace --all-features --locked
 
 [script]
 _watch-docs:

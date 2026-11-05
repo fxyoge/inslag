@@ -22,7 +22,7 @@ jobs:
   quality:
     name: Formatting, Clippy, and docs
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       RUSTUP_TOOLCHAIN: stable
       RUSTDOCFLAGS: -D warnings
@@ -47,7 +47,7 @@ jobs:
   test:
     name: Test (${{ matrix.os }}, Rust ${{ matrix.rust }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -84,7 +84,7 @@ jobs:
   lint-quality:
     name: Dylint formatting, Clippy, and docs
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       RUSTDOCFLAGS: -D warnings
     defaults:

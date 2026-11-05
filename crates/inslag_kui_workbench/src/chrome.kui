@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<view xmlns="urn:inslag-kui:1" xmlns:bind="urn:inslag-kui:binding:1" version="1" name="kui-workbench">
+  <node class="workbench">
+    <node class="toolbar">
+      <button on-click="views"><text>Views</text></button>
+      <button on-click="inspector"><text>Inspector</text></button>
+      <text bind:text="viewport"/>
+      <button on-click="viewport" value="responsive"><text>Auto</text></button>
+      <button on-click="viewport" value="720"><text>720p</text></button>
+      <button on-click="viewport" value="1080"><text>1080p</text></button>
+      <button on-click="viewport" value="mobile"><text>Phone</text></button>
+      <button on-click="viewport" value="custom"><text>Size</text></button>
+      <button on-click="zoom"><text>Fit / 1:1</text></button>
+      <button on-click="background"><text>BG</text></button>
+      <button on-click="reset"><text>Reset</text></button>
+      <text class="muted" bind:text="title"/>
+    </node>
+    <node class="body">
+      <node id="views-pane" class="views" bind:visible="show_views">
+        <button on-click="filter"><text bind:text="filter"/></button>
+        <button on-click="rescan"><text>Rescan</text></button>
+        <node id="views-list" class="list"/>
+        <text class="label">STORIES</text>
+        <node id="stories-list" class="list"/>
+      </node>
+      <button id="left-splitter" class="splitter" on-click="split" bind:visible="show_views"/>
+      <node id="preview-area" class="preview"><node id="preview-image"/></node>
+      <button id="right-splitter" class="splitter" on-click="split" bind:visible="show_inspector"/>
+      <node id="inspector-pane" class="inspector" bind:visible="show_inspector">
+        <node class="row">
+          <text class="label">DATA</text>
+          <button on-click="mode"><text bind:text="mode_label"/></button>
+          <button on-click="copy"><text>Copy</text></button>
+          <button on-click="paste"><text>Paste</text></button>
+        </node>
+        <text class="muted">Click to edit · Ctrl+A/C/V · Esc ends editing</text>
+        <node id="bindings-list" class="bindings" bind:visible="controls_mode"/>
+        <button id="raw-editor" class="raw" on-click="raw" bind:visible="raw_mode">
+          <text class="raw-copy" bind:text="raw"/>
+        </button>
+        <text class="error" bind:text="error"/>
+        <node class="row">
+          <text class="label">ACTIONS</text>
+          <button on-click="clear_log"><text>Clear</text></button>
+          <button on-click="copy_log"><text>Copy</text></button>
+        </node>
+        <node id="action-log" class="log"><text class="muted" bind:text="log"/></node>
+      </node>
+    </node>
+    <node class="status"><text bind:text="status"/></node>
+  </node>
+</view>

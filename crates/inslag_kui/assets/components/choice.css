@@ -1,0 +1,4 @@
+.choice { flex-direction: column; gap: 6px; padding: 16px 24px; background-color: #26322e; border: 1px solid #9e875b; border-radius: 4px; }
+.choice:hover { background-color: #35453d; }
+text { font-size: 20px; color: var(--ink, #eadfc3); }
+.hint { font-size: 13px; color: #9ba99e; }

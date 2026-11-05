@@ -1,0 +1,7 @@
+<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:bst="urn:inslag-state-tree" datamodel="luau" initial="active">
+  <datamodel><data id="label" expr="'State-tree KUI'"/></datamodel>
+  <state id="active">
+    <bst:activity id="view" name="ui.render"><bst:arg name="src" expr="'example.kui'"/></bst:activity>
+    <transition event="ui.action"><assign location="label" expr="_event.data.action .. ' ' .. _event.data.value"/></transition>
+  </state>
+</scxml>

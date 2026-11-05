@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<view xmlns="urn:inslag-kui:1" xmlns:bind="urn:inslag-kui:binding:1" version="1" name="example">
+  <style src="example.css"/>
+  <node class="panel">
+    <text bind:text="label">Loading</text>
+    <button on-click="hello" value="world"><text>Say hello</text></button>
+  </node>
+</view>
