@@ -17,7 +17,7 @@ use std::{
     any::TypeId,
     collections::{BTreeMap, HashMap, VecDeque},
     sync::{
-        Arc,
+        Arc, Weak,
         atomic::{AtomicU64, Ordering},
     },
 };
@@ -524,6 +524,38 @@ struct NativeRequest {
     validate: fn(&Catalog, &str) -> Result<(), LootError>,
 }
 
+#[derive(Default)]
+struct OutputValidationCache {
+    catalog: Weak<Catalog>,
+    outputs: HashMap<TypeId, HashMap<String, Result<(), LootError>>>,
+}
+
+impl OutputValidationCache {
+    fn validate(
+        &mut self,
+        catalog: &Arc<Catalog>,
+        table: &str,
+        output_type: TypeId,
+        validate: impl FnOnce(&Catalog, &str) -> Result<(), LootError>,
+    ) -> Result<(), LootError> {
+        if !std::ptr::eq(self.catalog.as_ptr(), Arc::as_ptr(catalog)) {
+            // A weak reference prevents address reuse without retaining obsolete catalogs.
+            self.catalog = Arc::downgrade(catalog);
+            self.outputs.clear();
+        }
+        let outputs = self.outputs.entry(output_type).or_default();
+        if let Some(result) = outputs.get(table) {
+            return result.clone();
+        }
+        let result = validate(catalog, table);
+        // Invalid request names must not grow the cache beyond the catalog's tables.
+        if catalog.tables.contains_key(table) {
+            outputs.insert(table.to_owned(), result.clone());
+        }
+        result
+    }
+}
+
 #[derive(Message)]
 struct NativeFinished {
     finished: LootFinished<Value>,
@@ -685,6 +717,7 @@ fn drive(
     mut runtime: ResMut<Runtime>,
     registry: Res<LootRegistry>,
     sources: Res<Sources>,
+    mut output_validation: Local<OutputValidationCache>,
 ) {
     for result in ingress.results.read() {
         if !runtime.current(result.token) {
@@ -745,7 +778,12 @@ fn drive(
         };
         let session = catalog
             .and_then(|catalog| {
-                (native.validate)(&catalog, &request.table)?;
+                output_validation.validate(
+                    &catalog,
+                    &request.table,
+                    native.output_type,
+                    native.validate,
+                )?;
                 Session::new(
                     catalog,
                     &request.table,

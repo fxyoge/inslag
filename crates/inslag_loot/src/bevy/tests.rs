@@ -682,3 +682,187 @@ fn source_revisions_recompile_once_and_recover_from_invalid_or_removed_assets() 
         &[Value::Integer(3)]
     );
 }
+
+#[test]
+fn output_validation_is_cached_by_root_and_output_type_including_failures() {
+    let app = fixture();
+    let catalog = catalog(
+        &app,
+        "table \"root\"\n  #child\ntable \"child\"\n  1\ntable \"text\"\n  text\n",
+    );
+    let mut cache = OutputValidationCache::default();
+    let checks = std::cell::Cell::new(0);
+    let mut errors = Vec::new();
+    for _ in 0..8 {
+        for table in ["root", "text"] {
+            let integer = cache.validate(&catalog, table, TypeId::of::<i64>(), |catalog, table| {
+                checks.set(checks.get() + 1);
+                catalog.validate_output::<i64>(table)
+            });
+            let text = cache.validate(&catalog, table, TypeId::of::<String>(), |catalog, table| {
+                checks.set(checks.get() + 1);
+                catalog.validate_output::<String>(table)
+            });
+            if table == "root" {
+                integer.unwrap();
+                errors.push(text.unwrap_err());
+            } else {
+                assert!(integer.is_err());
+                text.unwrap();
+            }
+        }
+    }
+    assert_eq!(checks.get(), 4);
+    assert!(errors.windows(2).all(|pair| pair[0] == pair[1]));
+    assert_eq!(errors[0].location.line, 4);
+}
+
+#[test]
+fn output_validation_cache_does_not_retain_catalogs_or_unknown_request_names() {
+    let app = fixture();
+    let catalog = catalog(&app, "table \"root\"\n  1\n");
+    let mut cache = OutputValidationCache::default();
+    cache
+        .validate(
+            &catalog,
+            "root",
+            TypeId::of::<i64>(),
+            Catalog::validate_output::<i64>,
+        )
+        .unwrap();
+    for index in 0..100 {
+        assert!(
+            cache
+                .validate(
+                    &catalog,
+                    &format!("missing{index}"),
+                    TypeId::of::<i64>(),
+                    Catalog::validate_output::<i64>,
+                )
+                .is_err()
+        );
+    }
+    assert_eq!(cache.outputs[&TypeId::of::<i64>()].len(), 1);
+    drop(catalog);
+    assert!(cache.catalog.upgrade().is_none());
+}
+
+#[test]
+fn requests_reuse_output_validation_across_batches_and_updates() {
+    use std::sync::atomic::AtomicUsize;
+
+    static CHECKS: AtomicUsize = AtomicUsize::new(0);
+
+    struct Number(i64);
+
+    impl LootOutput for Number {
+        fn accepts_type(value_type: &ValueType) -> bool {
+            CHECKS.fetch_add(1, Ordering::SeqCst);
+            i64::accepts_type(value_type)
+        }
+
+        fn accepts_value(value: &Value) -> bool {
+            CHECKS.fetch_add(1, Ordering::SeqCst);
+            i64::accepts_value(value)
+        }
+
+        fn from_value(value: Value) -> Result<Self, String> {
+            i64::from_value(value).map(Self)
+        }
+    }
+
+    let mut app = fixture();
+    app.add_loot_output::<Number>();
+    let catalog = catalog(&app, "table \"root\"\n  #child\ntable \"child\"\n  7\n");
+    let mut cursor = app
+        .world()
+        .resource::<Messages<LootFinished<Number>>>()
+        .get_cursor_current();
+    for _ in 0..3 {
+        for _ in 0..8 {
+            app.world_mut()
+                .write_message(LootRequest::<Number>::from_catalog(
+                    catalog.clone(),
+                    "root",
+                    0,
+                ));
+        }
+        app.update();
+        let mut count = 0;
+        for finished in cursor.read(app.world().resource::<Messages<LootFinished<Number>>>()) {
+            let result = finished.result.as_ref().unwrap();
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].0, 7);
+            count += 1;
+        }
+        assert_eq!(count, 8);
+        assert_eq!(CHECKS.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[test]
+fn output_validation_is_invalidated_when_assets_change_and_recovers_after_failures() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = "table \"root\"\n  @number\n  #child\ntable \"child\"\n  1\n";
+    std::fs::write(directory.path().join("reward.loot"), source).unwrap();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = calls.clone();
+    let mut app = App::new();
+    app.add_plugins((
+        TaskPoolPlugin::default(),
+        AssetPlugin {
+            file_path: directory.path().to_string_lossy().into_owned(),
+            ..Default::default()
+        },
+        LootPlugin::default().with_sources(["reward.loot"]),
+    ))
+    .add_loot_output::<i64>()
+    .add_loot_function("number", move || {
+        observed.fetch_add(1, Ordering::SeqCst);
+        7i64
+    });
+
+    fn roll(app: &mut App) -> Result<Vec<i64>, LootError> {
+        let mut cursor = app
+            .world()
+            .resource::<Messages<LootFinished<i64>>>()
+            .get_cursor_current();
+        app.world_mut()
+            .write_message(LootRequest::<i64>::new("root"));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            assert!(std::time::Instant::now() < deadline);
+            app.update();
+            if let Some(finished) = cursor
+                .read(app.world().resource::<Messages<LootFinished<i64>>>())
+                .next()
+            {
+                return finished.result.clone();
+            }
+            std::thread::yield_now();
+        }
+    }
+
+    assert_eq!(roll(&mut app).unwrap(), [7, 1]);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let handle = app.world().resource::<Sources>().handles[0].clone();
+    for (child, expected_calls) in [("text", 1), ("2", 2), ("false", 2), ("3", 3)] {
+        app.world_mut()
+            .resource_mut::<Assets<LootSource>>()
+            .get_mut(&handle)
+            .unwrap()
+            .text = source.replace("  1\n", &format!("  {child}\n"));
+        for _ in 0..4 {
+            app.update();
+        }
+        if let Ok(value) = child.parse::<i64>() {
+            assert_eq!(roll(&mut app).unwrap(), [7, value]);
+        } else {
+            let error = roll(&mut app).unwrap_err();
+            assert_eq!(error.location.line, 5);
+            assert!(error.message.contains("not supported"));
+            assert_eq!(roll(&mut app).unwrap_err(), error);
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), expected_calls);
+    }
+}
