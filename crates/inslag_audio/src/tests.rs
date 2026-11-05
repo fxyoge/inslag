@@ -1,30 +1,146 @@
 use super::*;
 
-use bevy_app::{TaskPoolPlugin, Update};
-use bevy_asset::{AssetApp, AssetPlugin};
+use std::{path::Path, sync::Mutex};
+
+use bevy_app::{PostUpdate, PreUpdate, TaskPoolPlugin, Update};
+use bevy_asset::{
+    AssetApp, AssetPlugin,
+    io::{
+        AssetSourceBuilder, AssetSourceId,
+        memory::{Dir, MemoryAssetReader},
+    },
+};
+use bevy_audio::{AudioLoader, Decodable, PlaybackMode};
+use bevy_ecs::schedule::ScheduleLabel;
 use bevy_time::{TimePlugin, TimeUpdateStrategy};
 use inslag_state_tree::{InstanceStatus, StateTreeDefinition, StateTreePlugin};
+use rodio::Source;
+
+#[path = "../tests/support/mod.rs"]
+mod support;
+use support::wave;
+#[path = "../tests/support/gated_reader.rs"]
+mod gated_reader;
+use gated_reader::{GateOpener, GatedReader};
+
+#[derive(Resource)]
+struct Sources {
+    directory: Dir,
+    gates: GateOpener,
+    handles: HashMap<String, Handle<AudioSource>>,
+}
+
+impl Drop for Sources {
+    fn drop(&mut self) {
+        self.gates.open_all();
+    }
+}
+
+#[derive(Component)]
+struct OfflineOutput(Mutex<rodio::queue::SourcesQueueOutput>);
+
+fn attach_sinks(
+    players: Query<(Entity, &AudioPlayer, &PlaybackSettings), Without<AudioSink>>,
+    sources: Res<Assets<AudioSource>>,
+    global: Res<GlobalVolume>,
+    mut commands: Commands,
+) {
+    for (entity, player, settings) in &players {
+        let source = sources.get(&player.0).unwrap();
+        let (player, output) = rodio::Player::new();
+        player.set_volume((settings.volume * global.volume).to_linear());
+        player.set_speed(settings.speed);
+        if matches!(settings.mode, PlaybackMode::Loop) {
+            player.append(source.decoder().repeat_infinite());
+        } else {
+            player.append(source.decoder());
+        }
+        commands
+            .entity(entity)
+            .insert((AudioSink::new(player), OfflineOutput(Mutex::new(output))));
+    }
+}
+
+fn drain_sinks(time: Res<Time<Real>>, mut outputs: Query<&mut OfflineOutput>) {
+    for mut output in &mut outputs {
+        output
+            .0
+            .get_mut()
+            .unwrap()
+            .take_duration(time.delta())
+            .for_each(drop);
+    }
+}
 
 fn app() -> App {
+    app_with_schedule(Update)
+}
+
+fn app_with_schedule(schedule: impl ScheduleLabel) -> App {
+    let schedule = schedule.intern();
+    let directory = Dir::default();
+    let (reader, gates) = GatedReader::new(MemoryAssetReader {
+        root: directory.clone(),
+    });
     let mut app = App::new();
+    app.register_asset_source(
+        AssetSourceId::Default,
+        AssetSourceBuilder::new(move || Box::new(reader.clone())),
+    );
     app.add_plugins((
         TaskPoolPlugin::default(),
         TimePlugin,
-        AssetPlugin::default(),
-        bevy_audio::AudioPlugin::default(),
+        AssetPlugin {
+            watch_for_changes_override: Some(false),
+            use_asset_processor_override: Some(false),
+            ..Default::default()
+        },
+        StateTreePlugin::new(schedule),
     ))
     .init_asset::<AudioSource>()
-    .add_plugins((
-        StateTreePlugin::new(Update),
-        crate::EnhancedAudioPlugin::new(Update),
-    ))
+    .register_asset_loader(AudioLoader)
+    .init_resource::<GlobalVolume>()
+    .init_resource::<AudioSettings>()
+    .init_resource::<AudioMixer>()
+    .init_resource::<Runtime>()
+    .insert_resource(Sources {
+        directory,
+        gates,
+        handles: HashMap::new(),
+    })
+    .add_message::<AudioDiagnostic>()
+    .add_state_tree_effect("audio.play", |context, args| {
+        Ok(Play {
+            owner: context.entity(),
+            sound: sound(args, false)?,
+        })
+    })
+    .add_state_tree_activity("audio.playback", |_, args| Ok(Playback(sound(args, true)?)))
+    .add_state_tree_effect("audio.set_bus_gain", |context, args| {
+        Ok(BusGain {
+            owner: context.entity(),
+            bus: args.take("bus")?,
+            gain: args.take("gain")?,
+        })
+    })
+    .add_systems(
+        schedule,
+        collect_activities.in_set(StateTreeSet::HandleActivities),
+    )
+    .add_systems(
+        schedule,
+        collect_effects.in_set(StateTreeSet::HandleEffects),
+    )
+    .add_systems(schedule, advance.after(StateTreeSet::HandleEffects))
+    .add_systems(PreUpdate, drain_sinks)
+    .add_systems(PostUpdate, attach_sinks)
     .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
         16,
     )));
     app.world_mut()
         .resource_mut::<Time<bevy_time::Virtual>>()
         .set_max_delta(Duration::from_secs(1_000));
-    app.world_mut().resource_mut::<Backend>().simulation = Some(Simulation::default());
+    app.update();
     app
 }
 
@@ -41,14 +157,50 @@ fn chart(app: &mut App, body: &str) -> Entity {
     app.world_mut().spawn(StateTreeInstance::new(handle)).id()
 }
 
-fn source(app: &mut App, src: &str, result: Result<Option<Duration>, &str>) {
+fn source(app: &mut App, src: &str, duration: Duration) {
+    let handle = app.world().resource::<AssetServer>().load(src.to_owned());
     app.world_mut()
-        .resource_mut::<Backend>()
-        .simulation
-        .as_mut()
-        .unwrap()
-        .sources
-        .insert(src.into(), result.map_err(str::to_owned));
+        .resource_mut::<Sources>()
+        .handles
+        .insert(src.into(), handle.clone());
+    let sources = app.world().resource::<Sources>();
+    sources
+        .directory
+        .insert_asset(Path::new(src), wave(duration));
+    sources.gates.open(src);
+    wait_for(app, |app| {
+        let server = app.world().resource::<AssetServer>();
+        assert!(
+            !matches!(
+                server.get_load_state(handle.id()),
+                Some(LoadState::Failed(_))
+            ),
+            "{src}: {:?}",
+            server.get_load_states(handle.id())
+        );
+        app.world()
+            .resource::<Assets<AudioSource>>()
+            .contains(handle.id())
+    });
+}
+
+#[track_caller]
+fn wait_for(app: &mut App, predicate: impl Fn(&App) -> bool) {
+    let strategy = app
+        .world_mut()
+        .remove_resource::<TimeUpdateStrategy>()
+        .unwrap();
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+    for _ in 0..4_096 {
+        app.update();
+        if predicate(app) {
+            app.insert_resource(strategy);
+            return;
+        }
+        std::thread::yield_now();
+    }
+    app.insert_resource(strategy);
+    panic!("audio did not settle after 4096 updates");
 }
 
 fn play(src: &str, extra: &str) -> String {
@@ -78,9 +230,29 @@ fn paths(app: &App) -> Vec<String> {
 }
 
 #[test]
+fn offline_playback_does_not_install_the_native_audio_plugin() {
+    let app = app();
+    assert!(!app.is_plugin_added::<AudioPlugin>());
+}
+
+#[test]
+#[should_panic(expected = "install Bevy's AudioPlugin before EnhancedAudioPlugin")]
+fn real_playback_requires_the_native_audio_plugin() {
+    let mut app = App::new();
+    app.add_plugins((
+        TaskPoolPlugin::default(),
+        TimePlugin,
+        AssetPlugin::default(),
+        StateTreePlugin::new(Update),
+    ))
+    .init_asset::<AudioSource>()
+    .add_plugins(EnhancedAudioPlugin::new(Update));
+}
+
+#[test]
 fn one_shot_uses_authored_asset_and_survives_state_exit() {
     let mut app = app();
-    source(&mut app, "confirm.wav", Ok(Some(Duration::from_secs(1))));
+    source(&mut app, "confirm.wav", Duration::from_secs(1));
     let entity = chart(
         &mut app,
         &format!(
@@ -104,7 +276,7 @@ fn one_shot_uses_authored_asset_and_survives_state_exit() {
 #[test]
 fn finite_activity_completes_through_normal_state_tree_outcomes() {
     let mut app = app();
-    source(&mut app, "finite.wav", Ok(Some(Duration::from_millis(10))));
+    source(&mut app, "finite.wav", Duration::from_millis(10));
     let owner = chart(
         &mut app,
         &format!(
@@ -128,7 +300,7 @@ fn finite_activity_completes_through_normal_state_tree_outcomes() {
 #[test]
 fn activity_load_failure_is_reported_once() {
     let mut app = app();
-    source(&mut app, "bad.wav", Err("missing file"));
+    app.world().resource::<Sources>().gates.open("bad.wav");
     let owner = chart(
         &mut app,
         &format!(
@@ -136,8 +308,18 @@ fn activity_load_failure_is_reported_once() {
             activity("bad.wav", "")
         ),
     );
-    app.update();
-    assert_eq!(app.world().resource::<Messages<AudioDiagnostic>>().len(), 1);
+    wait_for(&mut app, |app| {
+        app.world().resource::<Messages<AudioDiagnostic>>().len() == 1
+    });
+    assert!(
+        app.world()
+            .resource::<Messages<AudioDiagnostic>>()
+            .iter_current_update_messages()
+            .next()
+            .unwrap()
+            .reason
+            .contains("bad.wav")
+    );
     app.update();
     assert_eq!(
         app.world()
@@ -153,7 +335,6 @@ fn activity_load_failure_is_reported_once() {
 fn cancellation_during_loading_and_same_frame_start_cancel_never_play() {
     for immediate in [false, true] {
         let mut app = app();
-        source(&mut app, "loading.wav", Ok(None));
         let transition = if immediate {
             r#"<transition target="done"/>"#
         } else {
@@ -171,17 +352,15 @@ fn cancellation_during_loading_and_same_frame_start_cancel_never_play() {
             assert_eq!(paths(&app), ["loading.wav"]);
         }
         advance_time(&mut app, Duration::from_secs(1));
-        source(&mut app, "loading.wav", Ok(Some(Duration::from_secs(1))));
+        source(&mut app, "loading.wav", Duration::from_secs(1));
         app.update();
         assert!(paths(&app).is_empty());
         assert!(
-            app.world()
-                .resource::<Backend>()
-                .simulation
-                .as_ref()
-                .unwrap()
-                .starts
-                .is_empty()
+            app.world_mut()
+                .query::<&AudioPlayer>()
+                .iter(app.world())
+                .next()
+                .is_none()
         );
     }
 }
@@ -189,7 +368,7 @@ fn cancellation_during_loading_and_same_frame_start_cancel_never_play() {
 #[test]
 fn looping_activity_is_owned_and_despawn_stops_it() {
     let mut app = app();
-    source(&mut app, "music.wav", Ok(Some(Duration::from_millis(1))));
+    source(&mut app, "music.wav", Duration::from_millis(1));
     let owner = chart(
         &mut app,
         &format!(
@@ -212,7 +391,7 @@ fn looping_activity_is_owned_and_despawn_stops_it() {
 #[test]
 fn preference_and_authored_gains_multiply_and_mute_pending_and_active_playback() {
     let mut app = app();
-    source(&mut app, "music.wav", Ok(Some(Duration::from_secs(10))));
+    source(&mut app, "music.wav", Duration::from_secs(10));
     app.world_mut()
         .resource_mut::<AudioMixer>()
         .set_preference("music", 0.5)
@@ -235,6 +414,10 @@ fn preference_and_authored_gains_multiply_and_mute_pending_and_active_playback()
         app.world().get::<PlaybackSettings>(player).unwrap().volume,
         Volume::Linear(0.1)
     );
+    assert_eq!(
+        app.world().get::<AudioSink>(player).unwrap().volume(),
+        Volume::Linear(0.1)
+    );
     app.world_mut()
         .resource_mut::<AudioMixer>()
         .set_preference("music", 0.0)
@@ -242,6 +425,10 @@ fn preference_and_authored_gains_multiply_and_mute_pending_and_active_playback()
     app.update();
     assert_eq!(
         app.world().get::<PlaybackSettings>(player).unwrap().volume,
+        Volume::Linear(0.0)
+    );
+    assert_eq!(
+        app.world().get::<AudioSink>(player).unwrap().volume(),
         Volume::Linear(0.0)
     );
     app.world_mut()
@@ -253,6 +440,16 @@ fn preference_and_authored_gains_multiply_and_mute_pending_and_active_playback()
         app.world().get::<PlaybackSettings>(player).unwrap().volume,
         Volume::Linear(0.2)
     );
+    assert_eq!(
+        app.world().get::<AudioSink>(player).unwrap().volume(),
+        Volume::Linear(0.2)
+    );
+    app.world_mut().resource_mut::<GlobalVolume>().volume = Volume::Linear(0.5);
+    app.update();
+    assert_eq!(
+        app.world().get::<AudioSink>(player).unwrap().volume(),
+        Volume::Linear(0.1)
+    );
 }
 
 #[test]
@@ -262,7 +459,7 @@ fn burst_budget_preserves_priority_and_does_not_steal_activity_voices() {
         .resource_mut::<AudioSettings>()
         .max_one_shots = 2;
     for name in ["music.wav", "low.wav", "high.wav"] {
-        source(&mut app, name, Ok(Some(Duration::from_secs(10))));
+        source(&mut app, name, Duration::from_secs(10));
     }
     let low = play("low.wav", "");
     let high = play("high.wav", r#"<ist:arg name="priority" expr="10"/>"#);
@@ -284,7 +481,7 @@ fn burst_budget_preserves_priority_and_does_not_steal_activity_voices() {
 #[test]
 fn concurrency_is_scoped_to_owner_and_authored_group() {
     let mut app = app();
-    source(&mut app, "move.wav", Ok(Some(Duration::from_secs(1))));
+    source(&mut app, "move.wav", Duration::from_secs(1));
     let requests = play("move.wav", r#"<ist:arg name="group" expr="'movement'"/>"#).repeat(20);
     for _ in 0..2 {
         chart(
@@ -385,7 +582,7 @@ fn loading_activity_times_out_in_real_time() {
 #[test]
 fn reentry_replaces_generation_without_stopping_the_new_run() {
     let mut app = app();
-    source(&mut app, "loop.wav", Ok(Some(Duration::from_secs(1))));
+    source(&mut app, "loop.wav", Duration::from_secs(1));
     let owner = chart(
         &mut app,
         &format!(
@@ -413,13 +610,10 @@ fn reentry_replaces_generation_without_stopping_the_new_run() {
     );
     assert!(app.world().get_entity(old_entity).is_err());
     assert_eq!(
-        app.world()
-            .resource::<Backend>()
-            .simulation
-            .as_ref()
-            .unwrap()
-            .starts
-            .len(),
+        app.world_mut()
+            .query::<&OfflineOutput>()
+            .iter(app.world())
+            .count(),
         1
     );
 }
@@ -427,7 +621,7 @@ fn reentry_replaces_generation_without_stopping_the_new_run() {
 #[test]
 fn chart_replacement_cancels_old_playback() {
     let mut app = app();
-    source(&mut app, "loop.wav", Ok(Some(Duration::from_secs(1))));
+    source(&mut app, "loop.wav", Duration::from_secs(1));
     let owner = chart(
         &mut app,
         &format!(
@@ -454,20 +648,8 @@ fn chart_replacement_cancels_old_playback() {
 fn non_update_schedule_consumes_requests_in_its_own_run() {
     #[derive(Clone, Debug, PartialEq, Eq, Hash, bevy_ecs::schedule::ScheduleLabel)]
     struct ChartUpdate;
-    let mut app = App::new();
-    app.add_plugins((
-        TaskPoolPlugin::default(),
-        TimePlugin,
-        AssetPlugin::default(),
-        bevy_audio::AudioPlugin::default(),
-    ))
-    .init_asset::<AudioSource>()
-    .add_plugins((
-        StateTreePlugin::new(ChartUpdate),
-        crate::EnhancedAudioPlugin::new(ChartUpdate),
-    ));
-    app.world_mut().resource_mut::<Backend>().simulation = Some(Simulation::default());
-    source(&mut app, "custom.wav", Ok(Some(Duration::from_secs(1))));
+    let mut app = app_with_schedule(ChartUpdate);
+    source(&mut app, "custom.wav", Duration::from_secs(1));
     chart(
         &mut app,
         &format!(
@@ -479,97 +661,7 @@ fn non_update_schedule_consumes_requests_in_its_own_run() {
     assert_eq!(paths(&app), ["custom.wav"]);
 }
 
-#[cfg(feature = "wav")]
-fn wave() -> Vec<u8> {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"RIFF");
-    bytes.extend_from_slice(&196_u32.to_le_bytes());
-    bytes.extend_from_slice(b"WAVEfmt ");
-    bytes.extend_from_slice(&16_u32.to_le_bytes());
-    bytes.extend_from_slice(&1_u16.to_le_bytes());
-    bytes.extend_from_slice(&1_u16.to_le_bytes());
-    bytes.extend_from_slice(&8_000_u32.to_le_bytes());
-    bytes.extend_from_slice(&16_000_u32.to_le_bytes());
-    bytes.extend_from_slice(&2_u16.to_le_bytes());
-    bytes.extend_from_slice(&16_u16.to_le_bytes());
-    bytes.extend_from_slice(b"data");
-    bytes.extend_from_slice(&160_u32.to_le_bytes());
-    bytes.resize(204, 0);
-    bytes
-}
-
 #[test]
-#[cfg(feature = "wav")]
-fn actual_bevy_backend_loads_and_finishes_or_reports_unavailable_output() {
-    let directory = tempfile::tempdir().unwrap();
-    std::fs::write(directory.path().join("sound.wav"), wave()).unwrap();
-    let mut app = App::new();
-    app.add_plugins((
-        TaskPoolPlugin::default(),
-        TimePlugin,
-        AssetPlugin {
-            file_path: directory.path().to_string_lossy().into_owned(),
-            ..Default::default()
-        },
-        bevy_audio::AudioPlugin::default(),
-        StateTreePlugin::new(Update),
-        crate::EnhancedAudioPlugin::new(Update),
-    ))
-    .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
-        16,
-    )))
-    .insert_resource(AudioSettings {
-        load_timeout: Duration::from_secs(1_000),
-        ..Default::default()
-    });
-    let owner = chart(
-        &mut app,
-        &format!(
-            r#"<state id="active">{}<transition event="done.activity.sound error.activity.sound" target="done"/></state><final id="done"/>"#,
-            activity("sound.wav", "")
-        ),
-    );
-    let mut failures = Vec::new();
-    for _ in 0..4_096 {
-        app.update();
-        failures.extend(
-            app.world_mut()
-                .resource_mut::<Messages<AudioDiagnostic>>()
-                .drain(),
-        );
-        if app
-            .world()
-            .get::<StateTreeInstance>(owner)
-            .unwrap()
-            .status()
-            == &InstanceStatus::Complete
-        {
-            assert!(paths(&app).is_empty());
-            assert!(
-                failures
-                    .iter()
-                    .all(|failure| failure.reason.contains("device unavailable")),
-                "{failures:?}"
-            );
-            assert!(
-                app.world()
-                    .resource::<Runtime>()
-                    .cache
-                    .values()
-                    .any(|entry| entry
-                        .validation
-                        .as_ref()
-                        .is_some_and(|validation| validation.result.is_ok()))
-            );
-            return;
-        }
-        std::thread::yield_now();
-    }
-    panic!("actual audio playback never settled");
-}
-
-#[test]
-#[cfg(feature = "wav")]
 fn corrupt_audio_is_rejected_before_bevys_decoder_can_panic() {
     let mut runtime = Runtime::default();
     let path = AssetPath::from("bad.wav").into_owned();
@@ -578,7 +670,129 @@ fn corrupt_audio_is_rejected_before_bevys_decoder_can_panic() {
     };
     assert!(runtime.validate(&path, &invalid).is_err());
     let valid = AudioSource {
-        bytes: wave().into(),
+        bytes: wave(Duration::from_millis(10)).into(),
     };
     assert!(runtime.validate(&path, &valid).is_ok());
+}
+
+#[test]
+fn corrupt_sources_fail_before_starting_and_after_replacement() {
+    for replace_after_start in [false, true] {
+        let mut app = app();
+        source(&mut app, "sound.wav", Duration::from_secs(1));
+        let owner = chart(
+            &mut app,
+            &format!(
+                r#"<state id="active">{}<transition event="error.activity.sound" target="failed"/></state><final id="failed"/>"#,
+                activity("sound.wav", "")
+            ),
+        );
+        if replace_after_start {
+            app.update();
+        }
+        let handle = app.world().resource::<Sources>().handles["sound.wav"].clone();
+        app.world_mut()
+            .resource_mut::<Assets<AudioSource>>()
+            .get_mut(&handle)
+            .unwrap()
+            .bytes = vec![0, 1, 2].into();
+        app.update();
+        let failures: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AudioDiagnostic>>()
+            .drain()
+            .collect();
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].reason.contains("cannot decode audio"));
+        assert!(paths(&app).is_empty());
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<StateTreeInstance>(owner)
+                .unwrap()
+                .status(),
+            &InstanceStatus::Complete
+        );
+    }
+}
+
+#[test]
+fn unavailable_and_disappearing_sinks_fail_the_activity() {
+    for disappear in [false, true] {
+        let mut app = app();
+        source(&mut app, "sound.wav", Duration::from_secs(1));
+        let owner = chart(
+            &mut app,
+            &format!(
+                r#"<state id="active">{}<transition event="error.activity.sound" target="failed"/></state><final id="failed"/>"#,
+                activity("sound.wav", "")
+            ),
+        );
+        if disappear {
+            app.update();
+            app.update();
+            let player = app.world().resource::<Runtime>().voices[0]
+                .entity()
+                .unwrap();
+            app.world_mut()
+                .entity_mut(player)
+                .remove::<(AudioSink, OfflineOutput)>();
+        } else {
+            app.world_mut().run_schedule(Update);
+            app.world_mut()
+                .resource_mut::<Time<Real>>()
+                .advance_by(Duration::from_secs(3));
+        }
+        app.world_mut().run_schedule(Update);
+        let failures: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AudioDiagnostic>>()
+            .drain()
+            .collect();
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].reason.contains(if disappear {
+            "audio sink disappeared"
+        } else {
+            "device unavailable"
+        }));
+        assert!(paths(&app).is_empty());
+        app.world_mut().run_schedule(Update);
+        assert_eq!(
+            app.world()
+                .get::<StateTreeInstance>(owner)
+                .unwrap()
+                .status(),
+            &InstanceStatus::Complete
+        );
+    }
+}
+
+#[test]
+fn authored_speed_controls_real_sink_completion() {
+    let mut app = app();
+    source(&mut app, "sound.wav", Duration::from_secs(1));
+    let owner = chart(
+        &mut app,
+        &format!(
+            r#"<state id="active">{}<transition event="done.activity.sound" target="done"/></state><final id="done"/>"#,
+            activity("sound.wav", r#"<ist:arg name="speed" expr="2"/>"#)
+        ),
+    );
+    app.update();
+    let player = app.world().resource::<Runtime>().voices[0]
+        .entity()
+        .unwrap();
+    assert_eq!(app.world().get::<AudioSink>(player).unwrap().speed(), 2.0);
+    advance_time(&mut app, Duration::from_millis(400));
+    assert_eq!(paths(&app), ["sound.wav"]);
+    advance_time(&mut app, Duration::from_millis(200));
+    assert!(paths(&app).is_empty());
+    app.update();
+    assert_eq!(
+        app.world()
+            .get::<StateTreeInstance>(owner)
+            .unwrap()
+            .status(),
+        &InstanceStatus::Complete
+    );
 }

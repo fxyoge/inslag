@@ -25,6 +25,7 @@ rodio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+bevy_audio = { workspace = true, features = ["wav"] }
 tempfile.workspace = true
 
 [lints]

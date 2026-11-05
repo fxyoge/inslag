@@ -61,7 +61,6 @@ impl Plugin for EnhancedAudioPlugin {
         app.init_resource::<AudioSettings>()
             .init_resource::<AudioMixer>()
             .init_resource::<Runtime>()
-            .init_resource::<Backend>()
             .add_message::<AudioDiagnostic>()
             .configure_sets(
                 schedule,
@@ -121,7 +120,7 @@ struct Validation {
 }
 
 #[derive(Resource, Default)]
-pub(crate) struct Runtime {
+struct Runtime {
     pending: Vec<Request>,
     voices: Vec<Voice>,
     cache: HashMap<AssetPath<'static>, CachedSource>,
@@ -272,7 +271,6 @@ fn collect_activities(
     server: Res<AssetServer>,
     mut runtime: ResMut<Runtime>,
     mut context: ActivityContext,
-    mut backend: ResMut<Backend>,
 ) {
     for message in lifecycle.read() {
         match message {
@@ -316,107 +314,11 @@ fn collect_activities(
                     }
                     if let Some(entity) = voice.entity() {
                         context.commands.entity(entity).try_despawn();
-                        backend.forget(entity);
                     }
                     false
                 });
             }
         }
-    }
-}
-
-#[derive(Resource, Default)]
-pub(crate) struct Backend {
-    #[cfg(test)]
-    pub simulation: Option<Simulation>,
-}
-
-#[cfg(test)]
-#[derive(Default)]
-pub(crate) struct Simulation {
-    pub sources: HashMap<String, Result<Option<Duration>, String>>,
-    pub starts: HashMap<Entity, (String, Duration)>,
-}
-
-impl Backend {
-    fn ready(
-        &self,
-        src: &AssetPath<'static>,
-        handle: &Handle<AudioSource>,
-        server: &AssetServer,
-    ) -> Result<bool, String> {
-        #[cfg(test)]
-        if let Some(simulation) = &self.simulation {
-            return match simulation.sources.get(&src.to_string()) {
-                Some(Ok(Some(_))) => Ok(true),
-                Some(Err(error)) => Err(error.clone()),
-                _ => Ok(false),
-            };
-        }
-        let _ = src;
-        match server.get_load_state(handle.id()) {
-            Some(LoadState::Failed(error)) => Err(error.to_string()),
-            Some(LoadState::Loaded) => Ok(true),
-            _ => Ok(false),
-        }
-    }
-
-    fn simulated(&self) -> bool {
-        #[cfg(test)]
-        if self.simulation.is_some() {
-            return true;
-        }
-        false
-    }
-
-    fn started(&mut self, entity: Entity, src: &AssetPath<'static>, now: Duration) {
-        #[cfg(test)]
-        if let Some(simulation) = &mut self.simulation {
-            simulation.starts.insert(entity, (src.to_string(), now));
-        }
-        let _ = (entity, src, now);
-    }
-
-    fn status(
-        &self,
-        entity: Entity,
-        now: Duration,
-        looping: bool,
-        speed: f32,
-        players: &mut Query<(&mut PlaybackSettings, Option<&mut AudioSink>)>,
-    ) -> Result<Option<bool>, String> {
-        #[cfg(test)]
-        if let Some(simulation) = &self.simulation {
-            let Some((src, started)) = simulation.starts.get(&entity) else {
-                return Ok(None);
-            };
-            let duration = simulation
-                .sources
-                .get(src)
-                .and_then(|value| value.as_ref().ok())
-                .copied()
-                .flatten()
-                .unwrap();
-            return Ok(Some(
-                !looping
-                    && now.saturating_sub(*started).as_secs_f64() * f64::from(speed)
-                        >= duration.as_secs_f64(),
-            ));
-        }
-        let _ = (now, looping, speed);
-        match players.get_mut(entity) {
-            Ok((_, Some(sink))) => Ok(Some(sink.empty())),
-            Ok((_, None)) => Ok(None),
-            Err(_) => Err("audio playback entity disappeared".into()),
-        }
-    }
-
-    fn forget(&mut self, entity: Entity) {
-        #[cfg(test)]
-        if let Some(simulation) = &mut self.simulation {
-            simulation.starts.remove(&entity);
-        }
-        let _ = entity;
     }
 }
 
@@ -449,7 +351,6 @@ fn advance(
     mixer: Res<AudioMixer>,
     assets: PlaybackAssets,
     mut runtime: ResMut<Runtime>,
-    mut backend: ResMut<Backend>,
     mut context: PlaybackContext,
 ) {
     let PlaybackAssets { server, sources } = assets;
@@ -510,13 +411,13 @@ fn advance(
                 .get(token.entity())
                 .is_ok_and(|instance| instance.is_activity_active(token))
         {
-            stop(&voice, &mut backend, &mut context);
+            stop(&voice, &mut context);
             continue;
         }
         let gain = match mixer.gain(&voice.request.sound.bus) {
             Ok(gain) => gain * voice.request.sound.gain,
             Err(error) => {
-                fail(&voice, error.to_string(), &mut backend, &mut context);
+                fail(&voice, error.to_string(), &mut context);
                 continue;
             }
         };
@@ -528,60 +429,46 @@ fn advance(
                 {
                     continue;
                 }
-                match backend.ready(&voice.request.sound.src, &voice.handle, &server) {
-                    Err(error) => fail(&voice, error, &mut backend, &mut context),
-                    Ok(true) => {
-                        let validation = if backend.simulated() {
-                            Ok(())
-                        } else {
-                            sources
-                                .get(&voice.handle)
-                                .ok_or_else(|| "loaded audio source is unavailable".into())
-                                .and_then(|source| {
-                                    runtime.validate(&voice.request.sound.src, source)
-                                })
-                        };
+                match server.get_load_state(voice.handle.id()) {
+                    Some(LoadState::Failed(error)) => {
+                        fail(&voice, error.to_string(), &mut context);
+                    }
+                    Some(LoadState::Loaded) => {
+                        let validation = sources
+                            .get(&voice.handle)
+                            .ok_or_else(|| "loaded audio source is unavailable".into())
+                            .and_then(|source| runtime.validate(&voice.request.sound.src, source));
                         match validation {
                             Ok(()) => ready.push(voice),
-                            Err(error) => fail(&voice, error, &mut backend, &mut context),
+                            Err(error) => fail(&voice, error, &mut context),
                         }
                     }
-                    Ok(false)
-                        if now.saturating_sub(voice.request.queued) >= settings.load_timeout =>
-                    {
-                        fail(
-                            &voice,
-                            "audio loading timed out".into(),
-                            &mut backend,
-                            &mut context,
-                        )
+                    _ if now.saturating_sub(voice.request.queued) >= settings.load_timeout => {
+                        fail(&voice, "audio loading timed out".into(), &mut context)
                     }
-                    Ok(false) => retained.push(voice),
+                    _ => retained.push(voice),
                 }
             }
             Phase::Starting { entity, .. } | Phase::Playing { entity } => {
                 if matches!(voice.phase, Phase::Starting { .. })
-                    && !backend.simulated()
                     && let Some(source) = sources.get(&voice.handle)
                     && let Err(error) = runtime.validate(&voice.request.sound.src, source)
                 {
-                    fail(&voice, error, &mut backend, &mut context);
+                    fail(&voice, error, &mut context);
                     continue;
                 }
-                let status = backend.status(
-                    entity,
-                    now,
-                    voice.request.sound.looping,
-                    voice.request.sound.speed,
-                    &mut context.players,
-                );
+                let status = match context.players.get_mut(entity) {
+                    Ok((_, Some(sink))) => Ok(Some(sink.empty())),
+                    Ok((_, None)) => Ok(None),
+                    Err(_) => Err("audio playback entity disappeared".into()),
+                };
                 match status {
-                    Err(error) => fail(&voice, error, &mut backend, &mut context),
+                    Err(error) => fail(&voice, error, &mut context),
                     Ok(Some(true)) => {
                         if let Some(token) = voice.request.token {
                             context.outcomes.complete(token, ());
                         }
-                        stop(&voice, &mut backend, &mut context);
+                        stop(&voice, &mut context);
                     }
                     Ok(Some(false)) => {
                         sync_volume(entity, gain, &mut context);
@@ -592,12 +479,7 @@ fn advance(
                     }
                     Ok(None) => {
                         if matches!(voice.phase, Phase::Playing { .. }) {
-                            fail(
-                                &voice,
-                                "audio sink disappeared".into(),
-                                &mut backend,
-                                &mut context,
-                            );
+                            fail(&voice, "audio sink disappeared".into(), &mut context);
                             continue;
                         }
                         let since = match voice.phase {
@@ -608,7 +490,6 @@ fn advance(
                             fail(
                                 &voice,
                                 "audio output did not start (device unavailable)".into(),
-                                &mut backend,
                                 &mut context,
                             );
                         } else {
@@ -647,7 +528,6 @@ fn advance(
                     fail(
                         &voice,
                         "audio concurrency limit reached".into(),
-                        &mut backend,
                         &mut context,
                     );
                 }
@@ -669,7 +549,7 @@ fn advance(
                     && old.request.sound.priority < voice.request.sound.priority
                 {
                     let old = retained.remove(index);
-                    stop(&old, &mut backend, &mut context);
+                    stop(&old, &mut context);
                 } else {
                     continue;
                 }
@@ -687,14 +567,13 @@ fn advance(
             .commands
             .spawn((AudioPlayer::new(voice.handle.clone()), playback))
             .id();
-        backend.started(entity, &voice.request.sound.src, now);
         voice.phase = Phase::Starting { entity, since: now };
         retained.push(voice);
     }
     runtime.voices = retained;
 }
 
-fn fail(voice: &Voice, reason: String, backend: &mut Backend, context: &mut PlaybackContext) {
+fn fail(voice: &Voice, reason: String, context: &mut PlaybackContext) {
     if let Some(token) = voice.request.token {
         context.outcomes.fail(token, reason.clone());
     }
@@ -704,13 +583,12 @@ fn fail(voice: &Voice, reason: String, backend: &mut Backend, context: &mut Play
         src: voice.request.sound.src.to_string(),
         reason,
     });
-    stop(voice, backend, context);
+    stop(voice, context);
 }
 
-fn stop(voice: &Voice, backend: &mut Backend, context: &mut PlaybackContext) {
+fn stop(voice: &Voice, context: &mut PlaybackContext) {
     if let Some(entity) = voice.entity() {
         context.commands.entity(entity).try_despawn();
-        backend.forget(entity);
     }
 }
 
