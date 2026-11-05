@@ -1,0 +1,8 @@
+<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:ist="urn:inslag-state-tree">
+  <state id="parent">
+    <state id="child"/>
+    <history id="recent" type="deep">
+      <transition target="child"/>
+    </history>
+  </state>
+</scxml>

@@ -1,0 +1,28 @@
+//! Namespace-aware SCXML parsing and compilation.
+//!
+//! Parsing preserves authored syntax without resolving state ids or evaluating
+//! expressions. [`compile`] separately lowers the supported subset into the
+//! production runtime representation and rejects unsupported semantics.
+
+mod analysis;
+mod ast;
+mod compile;
+mod loader;
+#[cfg(test)]
+mod parity_tests;
+mod parse;
+
+pub(crate) use loader::ScxmlLoader;
+
+pub use ast::{
+    Assign, Attribute, Cancel, Capability, Content, ContentPart, Data, DataModel, DataModelChild,
+    Diagnostic, Document, DoneData, DoneDataChild, Else, ElseIf, ExecutableContent, Extension,
+    ExtensionContent, Final, FinalChild, Foreach, History, HistoryChild, If, IfChild, Initial, Log,
+    OnEntry, OnExit, Parallel, ParallelChild, Param, PayloadElement, PayloadPart, Raise, RootChild,
+    Script, Scxml, Send, SendChild, Span, State, StateChild, Transition, TransitionType,
+};
+pub use compile::{CompileError, compile};
+pub use parse::{SCXML_NAMESPACE, parse};
+
+/// Namespace URI for Bevy-specific executable content.
+pub const INSLAG_STATE_TREE_NAMESPACE: &str = "urn:inslag-state-tree";

@@ -1,0 +1,445 @@
+use std::{
+    collections::HashMap,
+    fmt::Write,
+    sync::{Arc, Mutex},
+};
+
+use bevy_app::{App, Plugin};
+use bevy_ecs::{entity::Entity, prelude::Resource};
+
+use crate::{InstanceStatus, LuauValue, RuntimeFault};
+
+/// How a shallow-history target selected its descendant configuration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum StateTreeHistoryResolution {
+    Default,
+    Stored,
+}
+
+/// Receives an ordered semantic trace from one state-tree execution.
+///
+/// Records describe deterministic semantic execution, including operations
+/// that begin before a runtime fault. They do not expose worker threads, Bevy
+/// schedules, speculative transition candidates, or other implementation
+/// details. A sink must not attempt to re-enter the execution that is currently
+/// producing records.
+pub(crate) trait StateTreeTrace {
+    /// Observes one record in execution order.
+    fn record(&mut self, record: StateTreeTraceRecord<'_>);
+}
+
+/// A trace sink that discards every record.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct NoStateTreeTrace;
+
+impl StateTreeTrace for NoStateTreeTrace {
+    #[inline]
+    fn record(&mut self, _record: StateTreeTraceRecord<'_>) {}
+}
+
+/// The event that initiated a macrostep.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum StateTreeTraceTrigger<'a> {
+    Initialization,
+    ExternalEvent(&'a str),
+    Timer,
+    ActivityOutcome(&'a str),
+}
+
+/// One semantic operation in a state-tree execution.
+///
+/// A microstep begins with [`Self::MicrostepStarted`], followed by every
+/// selected transition in canonical order. Multiple transitions may belong to
+/// the same microstep when orthogonal regions are supported.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub(crate) enum StateTreeTraceRecord<'a> {
+    MacrostepStarted {
+        trigger: StateTreeTraceTrigger<'a>,
+    },
+    MicrostepStarted {
+        index: usize,
+    },
+    TransitionSelected {
+        source: &'a str,
+    },
+    TransitionTarget {
+        state: &'a str,
+    },
+    TransitionHistoryTarget {
+        history: &'a str,
+        owner: &'a str,
+    },
+    TransitionTargetless,
+    HistoryResolved {
+        history: &'a str,
+        resolution: StateTreeHistoryResolution,
+    },
+    StateExitStarted {
+        state: &'a str,
+    },
+    StateExited {
+        state: &'a str,
+    },
+    StateEntered {
+        state: &'a str,
+    },
+    InternalEventRaised {
+        event: &'a str,
+    },
+    InternalEventConsumed {
+        event: &'a str,
+    },
+    DataAssigned {
+        data: &'a str,
+        value: &'a LuauValue,
+    },
+    EffectEmitted {
+        effect: &'a str,
+    },
+    ActivityStarted {
+        activity: &'a str,
+        generation: u64,
+    },
+    ActivityCancelled {
+        activity: &'a str,
+        generation: u64,
+    },
+    ActivityOutcome {
+        activity: &'a str,
+        success: bool,
+        generation: u64,
+    },
+    ConfigurationStarted,
+    ActiveState {
+        state: &'a str,
+    },
+    Status {
+        status: &'a InstanceStatus,
+    },
+    MacrostepEnded,
+}
+
+/// A stable, human-readable semantic event log.
+///
+/// The format is intended for checked-in golden traces and starts with a
+/// version header so incompatible changes are explicit.
+#[derive(Clone, Debug)]
+pub struct StateTreeEventLog {
+    output: String,
+}
+
+impl StateTreeEventLog {
+    pub const FORMAT_VERSION: u32 = 1;
+
+    /// Creates an empty versioned event log.
+    pub fn new() -> Self {
+        Self {
+            output: format!("state-tree-trace {}\n", Self::FORMAT_VERSION),
+        }
+    }
+
+    /// Returns the formatted trace.
+    pub fn as_str(&self) -> &str {
+        &self.output
+    }
+
+    /// Consumes the log and returns its formatted trace.
+    pub fn into_string(self) -> String {
+        self.output
+    }
+}
+
+impl Default for StateTreeEventLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StateTreeTrace for StateTreeEventLog {
+    fn record(&mut self, record: StateTreeTraceRecord<'_>) {
+        match record {
+            StateTreeTraceRecord::MacrostepStarted {
+                trigger: StateTreeTraceTrigger::Initialization,
+            } => self.output.push_str("macrostep initialize\n"),
+            StateTreeTraceRecord::MacrostepStarted {
+                trigger: StateTreeTraceTrigger::ExternalEvent(event),
+            } => {
+                writeln!(self.output, "macrostep external {event:?}").unwrap();
+            }
+            StateTreeTraceRecord::MacrostepStarted {
+                trigger: StateTreeTraceTrigger::Timer,
+            } => self.output.push_str("macrostep timer\n"),
+            StateTreeTraceRecord::MacrostepStarted {
+                trigger: StateTreeTraceTrigger::ActivityOutcome(activity),
+            } => writeln!(self.output, "macrostep activity {activity:?}").unwrap(),
+            StateTreeTraceRecord::MicrostepStarted { index } => {
+                writeln!(self.output, "microstep {index}").unwrap();
+            }
+            StateTreeTraceRecord::TransitionSelected { source } => {
+                writeln!(self.output, "transition {source:?}").unwrap();
+            }
+            StateTreeTraceRecord::TransitionTarget { state } => {
+                writeln!(self.output, "target {state:?}").unwrap();
+            }
+            StateTreeTraceRecord::TransitionHistoryTarget { history, owner } => {
+                writeln!(self.output, "target history {history:?} owner {owner:?}").unwrap();
+            }
+            StateTreeTraceRecord::TransitionTargetless => {
+                self.output.push_str("targetless\n");
+            }
+            StateTreeTraceRecord::HistoryResolved {
+                history,
+                resolution,
+            } => {
+                let resolution = match resolution {
+                    StateTreeHistoryResolution::Default => "default",
+                    StateTreeHistoryResolution::Stored => "stored",
+                };
+                writeln!(self.output, "history {history:?} {resolution}").unwrap();
+            }
+            StateTreeTraceRecord::StateExitStarted { state } => {
+                writeln!(self.output, "exit begin {state:?}").unwrap();
+            }
+            StateTreeTraceRecord::StateExited { state } => {
+                writeln!(self.output, "exit {state:?}").unwrap();
+            }
+            StateTreeTraceRecord::StateEntered { state } => {
+                writeln!(self.output, "enter {state:?}").unwrap();
+            }
+            StateTreeTraceRecord::InternalEventRaised { event } => {
+                writeln!(self.output, "raise {event:?}").unwrap();
+            }
+            StateTreeTraceRecord::InternalEventConsumed { event } => {
+                writeln!(self.output, "consume internal {event:?}").unwrap();
+            }
+            StateTreeTraceRecord::DataAssigned { data, value } => {
+                write!(self.output, "assign {data:?} = ").unwrap();
+                write_luau_value(&mut self.output, value);
+                self.output.push('\n');
+            }
+            StateTreeTraceRecord::EffectEmitted { effect } => {
+                writeln!(self.output, "effect {effect:?}").unwrap();
+            }
+            StateTreeTraceRecord::ActivityStarted {
+                activity,
+                generation,
+            } => writeln!(self.output, "activity start {activity:?} {generation}").unwrap(),
+            StateTreeTraceRecord::ActivityCancelled {
+                activity,
+                generation,
+            } => writeln!(self.output, "activity cancel {activity:?} {generation}").unwrap(),
+            StateTreeTraceRecord::ActivityOutcome {
+                activity,
+                success,
+                generation,
+            } => writeln!(
+                self.output,
+                "activity outcome {activity:?} {success} {generation}"
+            )
+            .unwrap(),
+            StateTreeTraceRecord::ConfigurationStarted => {
+                self.output.push_str("configuration\n");
+            }
+            StateTreeTraceRecord::ActiveState { state } => {
+                writeln!(self.output, "active {state:?}").unwrap();
+            }
+            StateTreeTraceRecord::Status { status } => match status {
+                InstanceStatus::Pending => self.output.push_str("status pending\n"),
+                InstanceStatus::Running => self.output.push_str("status running\n"),
+                InstanceStatus::Complete => self.output.push_str("status complete\n"),
+                InstanceStatus::Faulted(fault) => {
+                    self.output.push_str("status faulted ");
+                    write_fault(&mut self.output, fault);
+                    self.output.push('\n');
+                }
+            },
+            StateTreeTraceRecord::MacrostepEnded => self.output.push_str("macrostep end\n"),
+        }
+    }
+}
+
+/// Opt-in storage for semantic traces produced by Bevy state-tree instances.
+///
+/// Install [`StateTreeTracePlugin`], then inspect or remove each
+/// entity's accumulated log through this resource.
+#[derive(Resource)]
+pub struct StateTreeTraceLog {
+    logs: Mutex<HashMap<Entity, Arc<Mutex<StateTreeEventLog>>>>,
+}
+
+impl Default for StateTreeTraceLog {
+    fn default() -> Self {
+        Self {
+            logs: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl StateTreeTraceLog {
+    /// Returns a snapshot of one entity's accumulated event log.
+    pub fn get(&self, entity: Entity) -> Option<StateTreeEventLog> {
+        let log = self
+            .logs
+            .lock()
+            .expect("state-tree trace log poisoned")
+            .get(&entity)
+            .cloned()?;
+        let snapshot = log
+            .lock()
+            .expect("state-tree entity trace log poisoned")
+            .clone();
+        Some(snapshot)
+    }
+
+    /// Removes and returns one entity's accumulated event log.
+    pub fn remove(&self, entity: Entity) -> Option<StateTreeEventLog> {
+        let log = self
+            .logs
+            .lock()
+            .expect("state-tree trace log poisoned")
+            .remove(&entity)?;
+        let snapshot = log
+            .lock()
+            .expect("state-tree entity trace log poisoned")
+            .clone();
+        Some(snapshot)
+    }
+
+    pub(crate) fn record<R>(
+        &self,
+        entity: Entity,
+        record: impl FnOnce(&mut StateTreeEventLog) -> R,
+    ) -> R {
+        let log = {
+            let mut logs = self.logs.lock().expect("state-tree trace log poisoned");
+            Arc::clone(
+                logs.entry(entity)
+                    .or_insert_with(|| Arc::new(Mutex::new(StateTreeEventLog::new()))),
+            )
+        };
+        let mut log = log.lock().expect("state-tree entity trace log poisoned");
+        record(&mut log)
+    }
+
+    pub(crate) fn discard(&self, entity: Entity) {
+        self.logs
+            .lock()
+            .expect("state-tree trace log poisoned")
+            .remove(&entity);
+    }
+}
+
+/// Enables App-facing semantic trace collection.
+///
+/// Without this plugin, state-tree systems do not allocate, lock, or perform
+/// runtime work for individual trace records.
+#[derive(Default)]
+pub struct StateTreeTracePlugin;
+
+impl Plugin for StateTreeTracePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<StateTreeTraceLog>();
+    }
+}
+
+fn write_fault(output: &mut String, fault: &RuntimeFault) {
+    match fault {
+        RuntimeFault::MicrostepLimitExceeded { limit } => {
+            write!(output, "microstep-limit {limit}").unwrap();
+        }
+        RuntimeFault::Datamodel {
+            operation,
+            span_start: _,
+            message: _,
+        } => {
+            write!(output, "datamodel {operation:?}").unwrap();
+        }
+        RuntimeFault::Effect { effect, .. } => {
+            write!(output, "effect {effect:?}").unwrap();
+        }
+        RuntimeFault::EventDataProjection { event, .. } => {
+            write!(output, "event-data {event:?}").unwrap();
+        }
+        RuntimeFault::Activity { activity, .. } => write!(output, "activity {activity:?}").unwrap(),
+        RuntimeFault::ActivityDataProjection { activity, .. } => {
+            write!(output, "activity-data {activity:?}").unwrap()
+        }
+        RuntimeFault::UnknownDataOverride { name } => {
+            write!(output, "unknown-data-override {name:?}").unwrap()
+        }
+    }
+}
+
+fn write_luau_value(output: &mut String, value: &LuauValue) {
+    match value {
+        LuauValue::Nil => output.push_str("nil"),
+        LuauValue::Boolean(value) => write!(output, "{value}").unwrap(),
+        LuauValue::Integer(value) => write!(output, "{value}").unwrap(),
+        LuauValue::Number(value) => write!(output, "{value:?}").unwrap(),
+        LuauValue::String(value) => write!(output, "{value:?}").unwrap(),
+        LuauValue::Sequence(values) => {
+            output.push('[');
+            for (index, value) in values.iter().enumerate() {
+                if index != 0 {
+                    output.push_str(", ");
+                }
+                write_luau_value(output, value);
+            }
+            output.push(']');
+        }
+        LuauValue::Record(values) => {
+            output.push('{');
+            for (index, (name, value)) in values.iter().enumerate() {
+                if index != 0 {
+                    output.push_str(", ");
+                }
+                write!(output, "{name:?}: ").unwrap();
+                write_luau_value(output, value);
+            }
+            output.push('}');
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::mpsc, time::Duration};
+
+    use bevy_ecs::world::World;
+
+    use super::*;
+
+    #[test]
+    fn separate_entity_logs_can_be_recorded_concurrently() {
+        let traces = StateTreeTraceLog::default();
+        let mut world = World::new();
+        let first = world.spawn_empty().id();
+        let second = world.spawn_empty().id();
+        let (locked_sender, locked_receiver) = mpsc::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
+        let (recorded_sender, recorded_receiver) = mpsc::channel();
+
+        std::thread::scope(|scope| {
+            let trace_store = &traces;
+            scope.spawn(move || {
+                trace_store.record(first, |_log| {
+                    locked_sender.send(()).unwrap();
+                    release_receiver.recv().unwrap();
+                });
+            });
+            locked_receiver.recv().unwrap();
+            let trace_store = &traces;
+            scope.spawn(move || {
+                trace_store.record(second, |_log| {});
+                recorded_sender.send(()).unwrap();
+            });
+
+            let recorded_in_parallel = recorded_receiver
+                .recv_timeout(Duration::from_secs(1))
+                .is_ok();
+            release_sender.send(()).unwrap();
+            assert!(recorded_in_parallel);
+        });
+    }
+}

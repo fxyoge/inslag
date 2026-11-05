@@ -1,0 +1,63 @@
+[package]
+name = "inslag_state_tree"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Asset-backed hierarchical statecharts for Bevy"
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+persistence = ["dep:inslag_persist", "dep:serde", "dep:serde_json", "inslag_luau/serde"]
+
+[dependencies]
+inslag_persist = { workspace = true, optional = true }
+inslag_luau.workspace = true
+inslag_state_tree_macros.workspace = true
+bevy_app.workspace = true
+bevy_asset.workspace = true
+bevy_ecs.workspace = true
+bevy_reflect.workspace = true
+bevy_tasks.workspace = true
+bevy_time.workspace = true
+bevy_utils.workspace = true
+full_moon.workspace = true
+quick-xml.workspace = true
+thiserror.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+bevy_ecs = { workspace = true, features = ["bevy_reflect"] }
+divan.workspace = true
+
+[[example]]
+name = "save_slots"
+required-features = ["persistence"]
+
+[[bench]]
+name = "execution"
+harness = false
+
+[[bench]]
+name = "allocation"
+harness = false
+
+[[bench]]
+name = "event_storage"
+harness = false
+
+[[bench]]
+name = "persistence"
+harness = false
+required-features = ["persistence"]
+
+[[bench]]
+name = "checkpoint_frames"
+harness = false
+required-features = ["persistence"]
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:ist="urn:inslag-state-tree" name="transitions" datamodel="luau" initial="source">
+  <datamodel>
+    <data id="count" expr="0"/>
+    <data id="last"/>
+  </datamodel>
+  <state id="source">
+    <transition event="advance advance.fast" cond="_event.data.amount &gt; count" target="child">
+      <assign location="count" expr="count + 1"/>
+    </transition>
+    <transition event="observe">
+      <assign location="last" expr="_event.name"/>
+    </transition>
+    <transition event="combat"/>
+  </state>
+  <state id="parent" initial="child">
+    <state id="child">
+      <transition cond="count &gt; 0" target="done"/>
+    </state>
+  </state>
+  <final id="done"/>
+</scxml>

@@ -8,7 +8,8 @@ default:
 bench: \
   _bench-loot-execution \
   _bench-luau-expressions \
-  _bench-persist
+  _bench-persist \
+  _bench-state-tree
 
 docs: \
   _watch-docs
@@ -47,6 +48,9 @@ _bench-luau-expressions:
 
 _bench-persist:
   cargo bench -p inslag_persist
+
+_bench-state-tree:
+  cargo bench -p inslag_state_tree --all-features
 
 [script]
 [cache(inputs = [split(`rg --files --glob '**/*.rs'`)], outputs = "target-docs")]

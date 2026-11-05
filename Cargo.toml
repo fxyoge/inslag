@@ -15,6 +15,9 @@ inslag_format_loot = { version = "0.1.0", path = "crates/inslag_format_loot" }
 inslag_loot_macros = { version = "0.1.0", path = "crates/inslag_loot_macros" }
 inslag_persist = { version = "0.1.0", path = "crates/inslag_persist" }
 inslag_persist_macros = { version = "0.1.0", path = "crates/inslag_persist_macros" }
+inslag_luau = { version = "0.1.0", path = "crates/inslag_luau" }
+inslag_state_tree = { version = "0.1.0", path = "crates/inslag_state_tree" }
+inslag_state_tree_macros = { version = "0.1.0", path = "crates/inslag_state_tree_macros" }
 winnow = "1.0"
 proptest = { version = "1", default-features = false, features = ["std"] }
 bevy_app = "0.20.0"
@@ -24,6 +27,7 @@ bevy_reflect = "0.20.0"
 bevy_tasks = "0.20.0"
 bevy_transform = "0.20.0"
 bevy_time = { version = "0.20.0", default-features = false, features = ["std"] }
+bevy_utils = "0.20.0"
 inventory = "0.3"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 fastrand = "2"
@@ -38,6 +42,7 @@ full_moon = { version = "2.2.0", features = ["luau"] }
 mlua = { version = "0.11", features = ["luau", "vendored"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
+quick-xml = "0.41"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

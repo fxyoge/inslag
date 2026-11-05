@@ -1,0 +1,10 @@
+<scxml xmlns="http://www.w3.org/2005/07/scxml"
+       xmlns:ist="urn:inslag-state-tree" datamodel="luau">
+  <state id="idle">
+    <onentry>
+      <ist:effect name="publish">
+        <ist:arg name="amount" expr="7"/>
+      </ist:effect>
+    </onentry>
+  </state>
+</scxml>
