@@ -1,0 +1,75 @@
+warning: raw Bevy input API `ButtonInput` is forbidden in production source
+  --> $DIR/resolved_paths.rs:2:5
+   |
+LL | use bevy_input::ButtonInput as Buttons;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+   = note: `#[warn(bevy_enforce_bevy_enhanced_input)]` on by default
+
+warning: raw Bevy input API `ButtonInput` is forbidden in production source
+  --> $DIR/resolved_paths.rs:4:14
+   |
+LL | type Input = Buttons<KeyCode>;
+   |              ^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `ButtonInput` is forbidden in production source
+  --> $DIR/resolved_paths.rs:5:22
+   |
+LL | type Nested = Option<Input>;
+   |                      ^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `ButtonInput` is forbidden in production source
+  --> $DIR/resolved_paths.rs:6:13
+   |
+LL | fn alias(_: Nested) {}
+   |             ^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `Gamepad` is forbidden in production source
+  --> $DIR/resolved_paths.rs:7:17
+   |
+LL | fn qualified(_: bevy_input::gamepad::Gamepad) {}
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `MouseMotion` is forbidden in production source
+  --> $DIR/resolved_paths.rs:9:13
+   |
+LL |     pub use bevy_input::mouse::MouseMotion as Motion;
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `MouseMotion` is forbidden in production source
+  --> $DIR/resolved_paths.rs:11:16
+   |
+LL | fn reexport(_: facade::Motion) {}
+   |                ^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `Gamepad` is forbidden in production source
+  --> $DIR/resolved_paths.rs:14:16
+   |
+LL |     fn glob(_: Gamepad) {}
+   |                ^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `ButtonInput` is forbidden in production source
+  --> $DIR/resolved_paths.rs:17:13
+   |
+LL |     let _ = Buttons::<KeyCode>::default();
+   |             ^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: 9 warnings emitted
+

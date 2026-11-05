@@ -1,0 +1,11 @@
+warning: raw Bevy input API `Gamepad` is forbidden in production source
+  --> $DIR/test_files.rs:21:18
+   |
+LL | fn production(_: bevy_input::gamepad::Gamepad) {}
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+   = note: `#[warn(bevy_enforce_bevy_enhanced_input)]` on by default
+
+warning: 1 warning emitted
+

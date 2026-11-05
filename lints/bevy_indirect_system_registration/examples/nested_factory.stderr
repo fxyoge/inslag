@@ -1,0 +1,11 @@
+warning: calling a system configuration helper in Plugin::build hides system registration
+  --> $DIR/nested_factory.rs:17:34
+   |
+LL |         app.add_systems(Update, (configurations(), second).chain());
+   |                                  ^^^^^^^^^^^^^^^^
+   |
+   = help: move the system tuple and its configuration into the registration site
+   = note: `#[warn(bevy_indirect_system_registration)]` on by default
+
+warning: 1 warning emitted
+

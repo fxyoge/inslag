@@ -1,0 +1,123 @@
+warning: raw Bevy input API `ButtonInput` is forbidden in production source
+  --> $DIR/forbidden.rs:2:5
+   |
+LL | use bevy_input::ButtonInput;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+   = note: `#[warn(bevy_enforce_bevy_enhanced_input)]` on by default
+
+warning: raw Bevy input API `Gamepad` is forbidden in production source
+  --> $DIR/forbidden.rs:4:5
+   |
+LL |     Gamepad, GamepadAxisChangedEvent, GamepadButtonChangedEvent, GamepadButtonStateChangedEvent,
+   |     ^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `GamepadAxisChangedEvent` is forbidden in production source
+  --> $DIR/forbidden.rs:4:14
+   |
+LL |     Gamepad, GamepadAxisChangedEvent, GamepadButtonChangedEvent, GamepadButtonStateChangedEvent,
+   |              ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `GamepadButtonChangedEvent` is forbidden in production source
+  --> $DIR/forbidden.rs:4:39
+   |
+LL |     Gamepad, GamepadAxisChangedEvent, GamepadButtonChangedEvent, GamepadButtonStateChangedEvent,
+   |                                       ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `GamepadButtonStateChangedEvent` is forbidden in production source
+  --> $DIR/forbidden.rs:4:66
+   |
+LL |     Gamepad, GamepadAxisChangedEvent, GamepadButtonChangedEvent, GamepadButtonStateChangedEvent,
+   |                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `GamepadEvent` is forbidden in production source
+  --> $DIR/forbidden.rs:5:29
+   |
+LL |     GamepadConnectionEvent, GamepadEvent, RawGamepadAxisChangedEvent, RawGamepadButtonChangedEvent,
+   |                             ^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `RawGamepadAxisChangedEvent` is forbidden in production source
+  --> $DIR/forbidden.rs:5:43
+   |
+LL |     GamepadConnectionEvent, GamepadEvent, RawGamepadAxisChangedEvent, RawGamepadButtonChangedEvent,
+   |                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `RawGamepadButtonChangedEvent` is forbidden in production source
+  --> $DIR/forbidden.rs:5:71
+   |
+LL |     GamepadConnectionEvent, GamepadEvent, RawGamepadAxisChangedEvent, RawGamepadButtonChangedEvent,
+   |                                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `RawGamepadEvent` is forbidden in production source
+  --> $DIR/forbidden.rs:6:5
+   |
+LL |     RawGamepadEvent,
+   |     ^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `KeyboardInput` is forbidden in production source
+  --> $DIR/forbidden.rs:8:5
+   |
+LL | use bevy_input::keyboard::KeyboardInput;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `AccumulatedMouseMotion` is forbidden in production source
+  --> $DIR/forbidden.rs:10:5
+   |
+LL |     AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButtonInput, MouseMotion, MouseWheel,
+   |     ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `AccumulatedMouseScroll` is forbidden in production source
+  --> $DIR/forbidden.rs:10:29
+   |
+LL |     AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButtonInput, MouseMotion, MouseWheel,
+   |                             ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `MouseButtonInput` is forbidden in production source
+  --> $DIR/forbidden.rs:10:53
+   |
+LL |     AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButtonInput, MouseMotion, MouseWheel,
+   |                                                     ^^^^^^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `MouseMotion` is forbidden in production source
+  --> $DIR/forbidden.rs:10:71
+   |
+LL |     AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButtonInput, MouseMotion, MouseWheel,
+   |                                                                       ^^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: raw Bevy input API `MouseWheel` is forbidden in production source
+  --> $DIR/forbidden.rs:10:84
+   |
+LL |     AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButtonInput, MouseMotion, MouseWheel,
+   |                                                                                    ^^^^^^^^^^
+   |
+   = help: use `bevy_enhanced_input` instead
+
+warning: 15 warnings emitted
+

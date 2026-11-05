@@ -1,5 +1,10 @@
 [workspace]
-members = ["unchained_builder", "discarded_projection_work"]
+members = [
+    "bevy_enforce_bevy_enhanced_input",
+    "bevy_indirect_system_registration",
+    "unchained_builder",
+    "discarded_projection_work",
+]
 resolver = "3"
 
 [workspace.package]
@@ -10,7 +15,9 @@ publish = false
 [workspace.dependencies]
 dylint_linting = "6.3.2"
 dylint_testing = "6.3.2"
+bevy_app = { version = "0.19.1", default-features = false }
 bevy_ecs = { version = "0.19.1", default-features = false }
+bevy_input = { version = "0.19.1", default-features = false, features = ["std", "keyboard", "mouse", "gamepad"] }
 
 [workspace.lints.rust.unexpected_cfgs]
 level = "warn"

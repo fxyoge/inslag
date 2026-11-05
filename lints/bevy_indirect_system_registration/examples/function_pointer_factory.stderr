@@ -1,0 +1,11 @@
+warning: calling a system configuration helper in Plugin::build hides system registration
+  --> $DIR/function_pointer_factory.rs:17:33
+   |
+LL |         app.add_systems(Update, factory());
+   |                                 ^^^^^^^^^
+   |
+   = help: move the system tuple and its configuration into the registration site
+   = note: `#[warn(bevy_indirect_system_registration)]` on by default
+
+warning: 1 warning emitted
+
