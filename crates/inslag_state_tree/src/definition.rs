@@ -176,14 +176,14 @@ impl EventSet {
         }
     }
 
-    pub fn contains(&self, event: EventId) -> bool {
+    pub(crate) fn contains(&self, event: EventId) -> bool {
         let index = event.index();
         self.words
             .get(index / 64)
             .is_some_and(|word| word & (1 << (index % 64)) != 0)
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.words.iter().all(|word| *word == 0)
     }
 }
@@ -367,7 +367,7 @@ pub(crate) struct CompiledDefinition {
 }
 
 impl CompiledDefinition {
-    pub fn state(&self, target: impl Into<StateTreeTarget>) -> &StateNode {
+    pub(crate) fn state(&self, target: impl Into<StateTreeTarget>) -> &StateNode {
         let id = match target.into() {
             StateTreeTarget::State(state) => state,
             // Runtime tracing can still name an unresolved history target by its owner.
@@ -377,7 +377,7 @@ impl CompiledDefinition {
         &self.states[id.index()]
     }
 
-    pub fn children(&self, id: StateId) -> &[StateId] {
+    pub(crate) fn children(&self, id: StateId) -> &[StateId] {
         let state = self.state(id);
         let start = state.child_start as usize;
         &self.children[start..start + state.child_len as usize]
@@ -407,25 +407,25 @@ impl CompiledDefinition {
         &self.history_entries[start..start + len as usize]
     }
 
-    pub fn internal_event_matches(&self, candidate: EventId, emitted: EventId) -> bool {
+    pub(crate) fn internal_event_matches(&self, candidate: EventId, emitted: EventId) -> bool {
         let EventPattern::Exact(emitted) = &self.events[emitted.index()] else {
             return false;
         };
         event_pattern_name(&self.events[candidate.index()]) == emitted.as_ref()
     }
 
-    pub fn event_name(&self, event: EventId) -> Option<&str> {
+    pub(crate) fn event_name(&self, event: EventId) -> Option<&str> {
         match &self.events[event.index()] {
             EventPattern::Exact(name) => Some(name),
             EventPattern::Descriptor(_) => None,
         }
     }
 
-    pub fn effect_name(&self, effect: EffectId) -> &str {
+    pub(crate) fn effect_name(&self, effect: EffectId) -> &str {
         &self.effects[effect.index()]
     }
 
-    pub fn effect_names(&self) -> impl ExactSizeIterator<Item = &str> {
+    pub(crate) fn effect_names(&self) -> impl ExactSizeIterator<Item = &str> {
         self.effects.iter().map(Box::as_ref)
     }
 
@@ -466,7 +466,7 @@ impl std::fmt::Debug for LinkedDefinition {
 }
 
 impl LinkedDefinition {
-    pub fn new(
+    pub(crate) fn new(
         compiled: Arc<CompiledDefinition>,
         events: &StateTreeEventRegistry,
         effects: &StateTreeEffectRegistry,
@@ -551,7 +551,7 @@ impl LinkedDefinition {
         })
     }
 
-    pub fn external_event(&self, index: usize) -> Option<&EventSet> {
+    pub(crate) fn external_event(&self, index: usize) -> Option<&EventSet> {
         self.external_events.get(index)
     }
 
@@ -573,11 +573,11 @@ impl LinkedDefinition {
         }
     }
 
-    pub fn effect(&self, effect: EffectId) -> &Arc<dyn RegisteredEffect> {
+    pub(crate) fn effect(&self, effect: EffectId) -> &Arc<dyn RegisteredEffect> {
         &self.effects[effect.index()]
     }
 
-    pub fn activity(&self, activity: ActivityId) -> &Arc<dyn RegisteredActivity> {
+    pub(crate) fn activity(&self, activity: ActivityId) -> &Arc<dyn RegisteredActivity> {
         &self.activities[activity.index()]
     }
 

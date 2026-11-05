@@ -26,7 +26,7 @@ const PARALLEL: &str = "tests/scxml/benchmark_parallel.scxml";
 const EFFECT: &str = "benches/assets/benchmark_effect.scxml";
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, ScheduleLabel)]
-pub struct AiUpdate;
+pub(crate) struct AiUpdate;
 
 fn configure_simulation(config: &mut App) {
     config
@@ -44,17 +44,17 @@ fn configure_simulation(config: &mut App) {
 
 #[derive(Event, StateTreeEvent)]
 #[state_tree(name = "tick", broadcast)]
-pub struct Tick;
+pub(crate) struct Tick;
 
 #[derive(EntityEvent, StateTreeEvent)]
 #[state_tree(name = "tick.entity")]
-pub struct EntityTick {
+pub(crate) struct EntityTick {
     entity: Entity,
 }
 
 #[derive(Event, StateTreeEvent)]
 #[state_tree(name = "ignored", broadcast)]
-pub struct Ignored;
+pub(crate) struct Ignored;
 
 #[derive(Message)]
 struct BenchmarkEffect;
@@ -70,12 +70,12 @@ impl StateTreeActivity for BenchmarkActivity {
 struct BenchmarkActivityTokens(Vec<StateTreeActivityToken<BenchmarkActivity>>);
 
 #[derive(Clone, Copy)]
-pub enum Executor {
+pub(crate) enum Executor {
     Parallel,
     SingleThreaded,
 }
 
-pub enum BenchmarkDefinition {
+pub(crate) enum BenchmarkDefinition {
     Asset(&'static str),
     Generated(StateTreeDefinition),
 }
@@ -90,13 +90,13 @@ enum QueuedEvent {
     Entity(usize),
 }
 
-pub struct BenchmarkApp {
+pub(crate) struct BenchmarkApp {
     pub app: App,
     definition: bevy_asset::Handle<StateTreeDefinition>,
 }
 
 impl BenchmarkApp {
-    pub fn empty(definition: BenchmarkDefinition, executor: Executor) -> Self {
+    pub(crate) fn empty(definition: BenchmarkDefinition, executor: Executor) -> Self {
         let mut app = App::new();
         if matches!(executor, Executor::Parallel) {
             app.add_plugins(TaskPoolPlugin::default());
@@ -141,13 +141,17 @@ impl BenchmarkApp {
         }
     }
 
-    pub fn pending(definition: BenchmarkDefinition, instances: usize, executor: Executor) -> Self {
+    pub(crate) fn pending(
+        definition: BenchmarkDefinition,
+        instances: usize,
+        executor: Executor,
+    ) -> Self {
         let mut benchmark = Self::empty(definition, executor);
         benchmark.spawn_instances(instances);
         benchmark
     }
 
-    pub fn spawn_instances(&mut self, instances: usize) {
+    pub(crate) fn spawn_instances(&mut self, instances: usize) {
         for _ in 0..instances {
             self.app
                 .world_mut()
@@ -155,14 +159,14 @@ impl BenchmarkApp {
         }
     }
 
-    pub fn register_benchmark_effect(&mut self) {
+    pub(crate) fn register_benchmark_effect(&mut self) {
         self.app.add_systems(
             AiUpdate,
             clear_benchmark_effects.in_set(StateTreeSet::HandleEffects),
         );
     }
 
-    pub fn register_benchmark_activity(&mut self) {
+    pub(crate) fn register_benchmark_activity(&mut self) {
         self.app
             .init_resource::<BenchmarkActivityTokens>()
             .add_systems(
@@ -171,14 +175,14 @@ impl BenchmarkApp {
             );
     }
 
-    pub fn queue_activity_outcomes(&mut self) {
+    pub(crate) fn queue_activity_outcomes(&mut self) {
         self.app
             .world_mut()
             .run_system_once(complete_benchmark_activities)
             .expect("benchmark activity outcome system should run");
     }
 
-    pub fn initialized(
+    pub(crate) fn initialized(
         definition: BenchmarkDefinition,
         instances: usize,
         executor: Executor,
@@ -188,33 +192,33 @@ impl BenchmarkApp {
         benchmark
     }
 
-    pub fn run_schedule(&mut self) {
+    pub(crate) fn run_schedule(&mut self) {
         self.app.world_mut().run_schedule(AiUpdate);
     }
 
-    pub fn advance_time(&mut self, duration: Duration) {
+    pub(crate) fn advance_time(&mut self, duration: Duration) {
         self.app
             .world_mut()
             .resource_mut::<Time>()
             .advance_by(duration);
     }
 
-    pub fn queue_broadcast(&mut self) {
+    pub(crate) fn queue_broadcast(&mut self) {
         self.app
             .world_mut()
             .run_system_once(queue_broadcast_tick)
             .expect("benchmark event system should run");
     }
 
-    pub fn enable_broadcast_events(&mut self) {
+    pub(crate) fn enable_broadcast_events(&mut self) {
         self.app.insert_resource(QueuedEvent::Broadcast);
     }
 
-    pub fn enable_entity_events(&mut self, count: usize) {
+    pub(crate) fn enable_entity_events(&mut self, count: usize) {
         self.app.insert_resource(QueuedEvent::Entity(count));
     }
 
-    pub fn queue_entity_events(&mut self, count: usize) {
+    pub(crate) fn queue_entity_events(&mut self, count: usize) {
         self.app.world_mut().resource_mut::<TargetCount>().0 = count;
         self.app
             .world_mut()
@@ -311,23 +315,23 @@ fn complete_benchmark_activities(
     }
 }
 
-pub fn toggle_definition() -> BenchmarkDefinition {
+pub(crate) fn toggle_definition() -> BenchmarkDefinition {
     BenchmarkDefinition::Asset(TOGGLE)
 }
 
-pub fn luau_definition() -> BenchmarkDefinition {
+pub(crate) fn luau_definition() -> BenchmarkDefinition {
     BenchmarkDefinition::Asset(LUAU)
 }
 
-pub fn parallel_definition() -> BenchmarkDefinition {
+pub(crate) fn parallel_definition() -> BenchmarkDefinition {
     BenchmarkDefinition::Asset(PARALLEL)
 }
 
-pub fn effect_definition() -> BenchmarkDefinition {
+pub(crate) fn effect_definition() -> BenchmarkDefinition {
     BenchmarkDefinition::Asset(EFFECT)
 }
 
-pub fn activity_definition() -> BenchmarkDefinition {
+pub(crate) fn activity_definition() -> BenchmarkDefinition {
     let mut builder = StateTreeBuilder::new("activity");
     let root = builder.compound_root("root").unwrap();
     let active = builder.atomic("active", root).unwrap();
@@ -345,7 +349,7 @@ pub fn activity_definition() -> BenchmarkDefinition {
     BenchmarkDefinition::Generated(builder.build().unwrap())
 }
 
-pub fn history_definition() -> BenchmarkDefinition {
+pub(crate) fn history_definition() -> BenchmarkDefinition {
     let mut builder = StateTreeBuilder::new("history");
     let root = builder.compound_root("root").unwrap();
     let owner = builder.compound("owner", root).unwrap();
@@ -364,11 +368,11 @@ pub fn history_definition() -> BenchmarkDefinition {
     BenchmarkDefinition::Generated(builder.build().unwrap())
 }
 
-pub fn entity_toggle_definition() -> BenchmarkDefinition {
+pub(crate) fn entity_toggle_definition() -> BenchmarkDefinition {
     BenchmarkDefinition::Generated(toggle_builder("entity-toggle", "tick.entity"))
 }
 
-pub fn uninterested_definition() -> BenchmarkDefinition {
+pub(crate) fn uninterested_definition() -> BenchmarkDefinition {
     let mut builder = StateTreeBuilder::new("uninterested");
     let root = builder.compound_root("root").unwrap();
     let idle = builder.atomic("idle", root).unwrap();
@@ -376,7 +380,7 @@ pub fn uninterested_definition() -> BenchmarkDefinition {
     BenchmarkDefinition::Generated(builder.build().unwrap())
 }
 
-pub fn deep_definition(depth: usize) -> BenchmarkDefinition {
+pub(crate) fn deep_definition(depth: usize) -> BenchmarkDefinition {
     assert!(depth > 0);
     let mut builder = StateTreeBuilder::new(format!("depth-{depth}"));
     let root = builder.compound_root("root").unwrap();
@@ -392,7 +396,7 @@ pub fn deep_definition(depth: usize) -> BenchmarkDefinition {
     BenchmarkDefinition::Generated(builder.build().unwrap())
 }
 
-pub fn wide_parallel_definition(regions: usize) -> BenchmarkDefinition {
+pub(crate) fn wide_parallel_definition(regions: usize) -> BenchmarkDefinition {
     assert!(regions > 0);
     let mut builder = StateTreeBuilder::new(format!("parallel-{regions}"));
     let root = builder.compound_root("root").unwrap();
@@ -419,7 +423,7 @@ pub fn wide_parallel_definition(regions: usize) -> BenchmarkDefinition {
     BenchmarkDefinition::Generated(builder.build().unwrap())
 }
 
-pub fn transition_scan_definition(candidates: usize) -> BenchmarkDefinition {
+pub(crate) fn transition_scan_definition(candidates: usize) -> BenchmarkDefinition {
     let mut builder = StateTreeBuilder::new(format!("transition-scan-{candidates}"));
     let root = builder.compound_root("root").unwrap();
     let left = builder.atomic("left", root).unwrap();
@@ -442,7 +446,7 @@ pub fn transition_scan_definition(candidates: usize) -> BenchmarkDefinition {
     BenchmarkDefinition::Generated(builder.build().unwrap())
 }
 
-pub fn timer_definition(duration: Duration) -> BenchmarkDefinition {
+pub(crate) fn timer_definition(duration: Duration) -> BenchmarkDefinition {
     let mut builder = StateTreeBuilder::new("timer");
     let root = builder.compound_root("root").unwrap();
     let waiting = builder.atomic("waiting", root).unwrap();

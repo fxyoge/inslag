@@ -34,7 +34,7 @@ impl Default for Identities {
 }
 
 impl Identities {
-    pub fn enter(&mut self, entity: Entity) {
+    pub(crate) fn enter(&mut self, entity: Entity) {
         let entries = Arc::make_mut(&mut self.entries);
         let entry = entries.entry(entity).or_insert_with(|| {
             let id = self.next;
@@ -52,7 +52,7 @@ impl Identities {
         entry.memberships += 1;
     }
 
-    pub fn leave(&mut self, entity: Entity) {
+    pub(crate) fn leave(&mut self, entity: Entity) {
         let entry = Arc::make_mut(&mut self.entries)
             .get_mut(&entity)
             .expect("tracked identity");
@@ -64,7 +64,7 @@ impl Identities {
         }
     }
 
-    pub fn acknowledge(&mut self) {
+    pub(crate) fn acknowledge(&mut self) {
         let entries = Arc::make_mut(&mut self.entries);
         for entity in self.removed.drain() {
             entries.remove(&entity);

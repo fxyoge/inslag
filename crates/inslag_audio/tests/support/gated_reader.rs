@@ -15,7 +15,7 @@ struct Gate {
 }
 
 #[derive(Clone, Default)]
-pub struct GateOpener(Arc<Mutex<Gates>>);
+pub(super) struct GateOpener(Arc<Mutex<Gates>>);
 
 #[derive(Default)]
 struct Gates {
@@ -24,7 +24,7 @@ struct Gates {
 }
 
 impl GateOpener {
-    pub fn open(&self, path: impl AsRef<Path>) {
+    pub(super) fn open(&self, path: impl AsRef<Path>) {
         let waiters = {
             let mut gates = self.0.lock().unwrap();
             let gate = gates.paths.entry(path.as_ref().to_owned()).or_default();
@@ -36,7 +36,7 @@ impl GateOpener {
         }
     }
 
-    pub fn open_all(&self) {
+    pub(super) fn open_all(&self) {
         let paths = {
             let mut gates = self.0.lock().unwrap();
             gates.all_open = true;
@@ -51,13 +51,13 @@ impl GateOpener {
 }
 
 #[derive(Clone)]
-pub struct GatedReader<R> {
+pub(super) struct GatedReader<R> {
     reader: R,
     gates: GateOpener,
 }
 
 impl<R> GatedReader<R> {
-    pub fn new(reader: R) -> (Self, GateOpener) {
+    pub(super) fn new(reader: R) -> (Self, GateOpener) {
         let gates = GateOpener::default();
         (
             Self {

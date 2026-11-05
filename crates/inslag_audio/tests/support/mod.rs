@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-pub fn wave(duration: Duration) -> Vec<u8> {
+pub(super) fn wave(duration: Duration) -> Vec<u8> {
     let data_len = u32::try_from(duration.as_nanos() * 8_000 / 1_000_000_000 * 2).unwrap();
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"RIFF");

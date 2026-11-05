@@ -84,7 +84,7 @@ pub(crate) struct Storage {
 }
 
 impl Storage {
-    pub fn new(path: PathBuf) -> Self {
+    pub(crate) fn new(path: PathBuf) -> Self {
         Self {
             path,
             connection: Mutex::new(None),
@@ -93,7 +93,7 @@ impl Storage {
         }
     }
 
-    pub fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         self.closed = true;
         self.connection
             .get_mut()

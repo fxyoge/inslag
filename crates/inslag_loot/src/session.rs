@@ -3,7 +3,7 @@ use crate::{Arguments, Catalog, LootError, SourceLocation, Value, ValueType};
 use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Clone, Copy, Debug)]
-pub struct Limits {
+pub(crate) struct Limits {
     pub max_steps: usize,
     pub max_depth: usize,
     pub max_results: usize,
@@ -22,7 +22,7 @@ impl Default for Limits {
 }
 
 #[derive(Clone, Debug)]
-pub struct FunctionCall {
+pub(crate) struct FunctionCall {
     pub function: String,
     pub arguments: Arguments,
     pub location: SourceLocation,
@@ -33,7 +33,7 @@ pub struct FunctionCall {
 
 #[cfg(test)]
 #[derive(Clone, Debug)]
-pub enum TraceEvent {
+pub(crate) enum TraceEvent {
     Selected {
         location: SourceLocation,
         child: usize,
@@ -46,7 +46,7 @@ pub enum TraceEvent {
 }
 
 #[derive(Clone, Debug)]
-pub enum Step {
+pub(crate) enum Step {
     Call(FunctionCall),
     Waiting,
     Finished(Vec<Value>),
@@ -71,7 +71,7 @@ struct Pending {
 }
 
 #[derive(Debug)]
-pub struct Session {
+pub(crate) struct Session {
     catalog: Arc<Catalog>,
     random: fastrand::Rng,
     frames: Vec<Frame>,
@@ -86,7 +86,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(
+    pub(crate) fn new(
         catalog: Arc<Catalog>,
         table: &str,
         inputs: BTreeMap<String, Value>,
@@ -121,16 +121,16 @@ impl Session {
         })
     }
 
-    pub fn with_limits(mut self, limits: Limits) -> Self {
+    pub(crate) fn with_limits(mut self, limits: Limits) -> Self {
         self.limits = limits;
         self
     }
     #[cfg(test)]
-    pub fn trace(&self) -> &[TraceEvent] {
+    pub(crate) fn trace(&self) -> &[TraceEvent] {
         &self.trace
     }
 
-    pub fn advance(&mut self) -> Result<Step, LootError> {
+    pub(crate) fn advance(&mut self) -> Result<Step, LootError> {
         if let Some(error) = &self.failure {
             return Err(error.clone());
         }
@@ -345,7 +345,7 @@ impl Session {
         }
     }
 
-    pub fn resume(&mut self, result: Result<Vec<Value>, String>) -> Result<(), LootError> {
+    pub(crate) fn resume(&mut self, result: Result<Vec<Value>, String>) -> Result<(), LootError> {
         if let Some(error) = &self.failure {
             return Err(error.clone());
         }

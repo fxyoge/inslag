@@ -7,13 +7,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
-pub struct SourceDocument {
+pub(crate) struct SourceDocument {
     pub name: String,
     pub text: String,
 }
 
 impl SourceDocument {
-    pub fn new(name: impl Into<String>, text: impl Into<String>) -> Self {
+    pub(crate) fn new(name: impl Into<String>, text: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             text: text.into(),
@@ -22,7 +22,7 @@ impl SourceDocument {
 }
 
 #[derive(Clone, Debug)]
-pub struct Catalog {
+pub(crate) struct Catalog {
     pub(crate) tables: BTreeMap<String, Table>,
     pub(crate) inputs: BTreeMap<String, BTreeSet<String>>,
     pub(crate) functions: FunctionSignatures,
@@ -30,7 +30,7 @@ pub struct Catalog {
 
 #[cfg(test)]
 #[derive(Debug)]
-pub struct LootTable<T> {
+pub(crate) struct LootTable<T> {
     pub(crate) catalog: Arc<Catalog>,
     pub(crate) name: String,
     marker: std::marker::PhantomData<fn() -> T>,
@@ -49,14 +49,17 @@ impl<T> Clone for LootTable<T> {
 
 #[cfg(test)]
 impl<T> LootTable<T> {
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         &self.name
     }
 }
 
 impl Catalog {
     #[cfg(test)]
-    pub fn table<T: LootOutput>(self: &Arc<Self>, name: &str) -> Result<LootTable<T>, LootError> {
+    pub(crate) fn table<T: LootOutput>(
+        self: &Arc<Self>,
+        name: &str,
+    ) -> Result<LootTable<T>, LootError> {
         self.validate_output::<T>(name)?;
         Ok(LootTable {
             catalog: self.clone(),
@@ -133,7 +136,7 @@ impl Catalog {
         Ok(())
     }
 
-    pub fn compile(
+    pub(crate) fn compile(
         sources: impl IntoIterator<Item = SourceDocument>,
         functions: &FunctionSignatures,
     ) -> Result<Self, LootError> {
@@ -192,7 +195,7 @@ impl Catalog {
     }
 
     #[cfg(test)]
-    pub fn required_inputs(&self, table: &str) -> Option<impl Iterator<Item = &str>> {
+    pub(crate) fn required_inputs(&self, table: &str) -> Option<impl Iterator<Item = &str>> {
         self.inputs
             .get(table)
             .map(|names| names.iter().map(String::as_str))

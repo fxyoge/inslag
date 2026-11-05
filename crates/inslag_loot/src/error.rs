@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SourceLocation {
+pub(crate) struct SourceLocation {
     pub source: Arc<str>,
     pub line: usize,
     pub column: usize,
@@ -20,7 +20,7 @@ pub(crate) struct SourceMap<'a> {
 }
 
 impl<'a> SourceMap<'a> {
-    pub fn new(name: &str, text: &'a str) -> Self {
+    pub(crate) fn new(name: &str, text: &'a str) -> Self {
         Self {
             name: name.into(),
             text,
@@ -30,7 +30,7 @@ impl<'a> SourceMap<'a> {
         }
     }
 
-    pub fn location(&self, offset: usize) -> SourceLocation {
+    pub(crate) fn location(&self, offset: usize) -> SourceLocation {
         let line = self.lines.partition_point(|&start| start <= offset) - 1;
         SourceLocation {
             source: self.name.clone(),

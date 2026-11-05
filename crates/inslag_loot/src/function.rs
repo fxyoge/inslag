@@ -179,14 +179,14 @@ impl FunctionSignature {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct FunctionSignatures(pub(crate) BTreeMap<String, FunctionSignature>);
+pub(crate) struct FunctionSignatures(pub(crate) BTreeMap<String, FunctionSignature>);
 
 impl FunctionSignatures {
     #[cfg(test)]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
-    pub fn register(
+    pub(crate) fn register(
         &mut self,
         name: &str,
         signature: FunctionSignature,
@@ -201,7 +201,7 @@ impl FunctionSignatures {
         self.0.insert(name.into(), signature);
         Ok(self)
     }
-    pub fn get(&self, name: &str) -> Option<&FunctionSignature> {
+    pub(crate) fn get(&self, name: &str) -> Option<&FunctionSignature> {
         self.0.get(name)
     }
 }

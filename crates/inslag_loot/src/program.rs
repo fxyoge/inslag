@@ -10,7 +10,7 @@ pub(crate) enum Expression {
 }
 
 impl Expression {
-    pub fn variable(&self) -> Option<&str> {
+    pub(crate) fn variable(&self) -> Option<&str> {
         match self {
             Self::Variable(name) | Self::Not(name) => Some(name),
             _ => None,

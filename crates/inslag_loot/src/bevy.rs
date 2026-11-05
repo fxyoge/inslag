@@ -68,11 +68,11 @@ pub(crate) struct LootRegistry(RegistryData);
 
 impl LootRegistry {
     #[cfg(test)]
-    pub fn signatures(&self) -> FunctionSignatures {
+    pub(crate) fn signatures(&self) -> FunctionSignatures {
         self.0.signatures.clone()
     }
 
-    pub fn compile(
+    pub(crate) fn compile(
         &self,
         sources: impl IntoIterator<Item = SourceDocument>,
     ) -> Result<Arc<Catalog>, LootError> {
@@ -80,7 +80,7 @@ impl LootRegistry {
     }
 
     #[cfg(test)]
-    pub fn generate<T: LootOutput>(
+    pub(crate) fn generate<T: LootOutput>(
         &self,
         table: &crate::LootTable<T>,
         inputs: BTreeMap<String, Value>,
