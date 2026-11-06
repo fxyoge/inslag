@@ -54,7 +54,7 @@ full_moon = { version = "2.2.0", features = ["luau"] }
 mlua = { version = "0.11", features = ["luau", "vendored"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
-quick-xml = "0.41"
+quick-xml = "0.42"
 bevy = { version = "0.20.0", default-features = false }
 bevy_flair = { git = "https://github.com/fxyoge/bevy_flair.git", rev = "b9d7b2c5a4efc26820add8a548da37c3eb6d34cd", features = ["ghost_nodes"] }
 bevy_aseprite_ultra = "0.10.0"
