@@ -632,7 +632,7 @@ dependencies = [
  "bevy_math",
  "bevy_reflect",
  "bevy_transform",
- "rodio",
+ "rodio 0.22.2",
  "tracing",
 ]
 
@@ -3588,7 +3588,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_time",
  "inslag_state_tree",
- "rodio",
+ "rodio 0.23.0",
  "tempfile",
  "tracing",
 ]
@@ -5538,6 +5538,17 @@ dependencies = [
  "symphonia",
  "thiserror 2.0.21",
  "tracing",
+]
+
+[[package]]
+name = "rodio"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36e3ee0a5ca418bac59a15d5506e498ab138359edbb67257a6b8a3b93d411f39"
+dependencies = [
+ "dasp_sample",
+ "num-rational",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
