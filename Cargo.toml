@@ -40,7 +40,7 @@ bevy_transform = "0.20.0"
 bevy_time = { version = "0.20.0", default-features = false, features = ["std"] }
 bevy_utils = "0.20.0"
 inventory = "0.3"
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite = { version = "0.41.0", features = ["bundled"] }
 fastrand = "2"
 thiserror = "2.0"
 divan = "0.1.21"
