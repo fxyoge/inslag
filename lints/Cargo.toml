@@ -19,9 +19,9 @@ publish = false
 [workspace.dependencies]
 dylint_linting = "6.3.2"
 dylint_testing = "6.3.2"
-bevy_app = { version = "0.19.1", default-features = false }
-bevy_ecs = { version = "0.19.1", default-features = false }
-bevy_input = { version = "0.19.1", default-features = false, features = ["std", "keyboard", "mouse", "gamepad"] }
+bevy_app = { version = "0.20.0", default-features = false }
+bevy_ecs = { version = "0.20.0", default-features = false }
+bevy_input = { version = "0.20.0", default-features = false, features = ["std", "keyboard", "mouse", "gamepad"] }
 
 [workspace.lints.rust.unexpected_cfgs]
 level = "warn"
