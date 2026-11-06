@@ -1,0 +1,25 @@
+[package]
+name = "inslag_asset_aseprite"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Aseprite source slices and packed sprite artifacts"
+
+[dependencies]
+inslag_asset_pipeline.workspace = true
+inslag_asset_image.workspace = true
+serde.workspace = true
+flate2 = "1"
+asefile = "0.3.8"
+
+[build-dependencies]
+inslag_asset_pipeline.workspace = true
+inslag_asset_image.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

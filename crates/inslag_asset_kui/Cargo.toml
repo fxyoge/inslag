@@ -1,0 +1,24 @@
+[package]
+name = "inslag_asset_kui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "KUI stylesheet artifacts derived from packed sprites"
+
+[dependencies]
+inslag_asset_pipeline.workspace = true
+inslag_asset_aseprite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+inslag_asset_pipeline.workspace = true
+inslag_asset_aseprite.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

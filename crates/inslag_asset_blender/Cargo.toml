@@ -1,0 +1,25 @@
+[package]
+name = "inslag_asset_blender"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Authored Blender scenes rendered into color and depth sequences"
+
+[dependencies]
+inslag_asset_pipeline.workspace = true
+inslag_asset_image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+exr = "1"
+
+[build-dependencies]
+inslag_asset_pipeline.workspace = true
+inslag_asset_image.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

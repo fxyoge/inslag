@@ -1,0 +1,24 @@
+[package]
+name = "inslag_asset_svg"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SVG image sources for offline asset pipelines"
+
+[dependencies]
+inslag_asset_pipeline.workspace = true
+inslag_asset_image.workspace = true
+serde.workspace = true
+resvg = { version = "0.45", default-features = false }
+
+[build-dependencies]
+inslag_asset_pipeline.workspace = true
+inslag_asset_image.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

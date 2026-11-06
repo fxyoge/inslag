@@ -1,0 +1,23 @@
+[package]
+name = "inslag_asset_image"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Typed image sequences and pixel-native asset operations"
+
+[dependencies]
+inslag_asset_pipeline.workspace = true
+serde.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
+exr = "1"
+
+[build-dependencies]
+inslag_asset_pipeline.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

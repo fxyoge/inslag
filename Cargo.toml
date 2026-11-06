@@ -11,6 +11,12 @@ license = "MIT"
 repository = "https://github.com/fxyoge/inslag"
 
 [workspace.dependencies]
+inslag_asset_pipeline = { version = "0.1.0", path = "crates/inslag_asset_pipeline" }
+inslag_asset_image = { version = "0.1.0", path = "crates/inslag_asset_image" }
+inslag_asset_blender = { version = "0.1.0", path = "crates/inslag_asset_blender" }
+inslag_asset_aseprite = { version = "0.1.0", path = "crates/inslag_asset_aseprite" }
+inslag_asset_svg = { version = "0.1.0", path = "crates/inslag_asset_svg" }
+inslag_asset_kui = { version = "0.1.0", path = "crates/inslag_asset_kui" }
 inslag_audio = { version = "0.1.0", path = "crates/inslag_audio", default-features = false }
 inslag_e2e = { version = "0.1.0", path = "crates/inslag_e2e" }
 inslag_e2e_build = { version = "0.1.0", path = "crates/inslag_e2e_build" }
