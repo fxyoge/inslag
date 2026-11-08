@@ -45,7 +45,7 @@ fastrand = "2"
 thiserror = "2.0"
 divan = "0.1.21"
 tempfile = "3"
-toml = "0.8"
+toml = "1.0"
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
