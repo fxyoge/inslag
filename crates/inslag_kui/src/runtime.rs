@@ -607,7 +607,7 @@ fn validate_context(nodes: &[KuiNode], world_space: bool) -> Result<(), String> 
             }) || node
                 .bindings
                 .iter()
-                .any(|b| matches!(b, KuiBinding::Property { name, .. } if !matches!(name.as_str(), "x" | "y"))))
+                .any(|b| matches!(b, KuiBinding::Property { name, .. } if !matches!(name.as_str(), "x" | "y" | "right" | "bottom"))))
         {
             return Err(
                 "transform and crop attributes currently require a world presentation context"
@@ -921,21 +921,27 @@ fn sync_views(
                         KuiValue::Integer(n) => Some(*n as f32),
                         _ => None,
                     };
-                    if matches!(name.as_str(), "x" | "y")
+                    if matches!(name.as_str(), "x" | "y" | "right" | "bottom")
                         && let (Some(value), Ok(mut node)) = (
                             value.filter(|v| v.is_finite()),
                             nodes.get_mut(binding.entity),
                         )
                     {
-                        let target = if name == "x" {
-                            &mut node.left
-                        } else {
-                            &mut node.top
+                        let target = match name.as_str() {
+                            "x" => &mut node.left,
+                            "y" => &mut node.top,
+                            "right" => &mut node.right,
+                            "bottom" => &mut node.bottom,
+                            _ => unreachable!(),
                         };
                         if *target != Val::Px(value) {
                             *target = Val::Px(value);
                         }
                         binding.previous = binding.values[0].clone();
+                        continue;
+                    }
+                    if matches!(name.as_str(), "right" | "bottom") {
+                        warn_once!("KUI edge bindings require a screen layout node");
                         continue;
                     }
                     if let (Some(value), Ok(mut transform)) = (

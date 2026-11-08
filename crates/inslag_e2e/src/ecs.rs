@@ -367,7 +367,9 @@ pub(crate) fn screen(world: &World, lua: &Lua, args: &Table) -> Result<Value, St
             return Err("UI node has no layout area".into());
         }
         let (_, _, center) = transform.to_scale_angle_translation();
-        center * node.inverse_scale_factor
+        center
+            * node.inverse_scale_factor
+            * world.get_resource::<UiScale>().map_or(1.0, |scale| scale.0)
     } else {
         if layout {
             return Err("screen UI node has no computed geometry".into());
@@ -743,6 +745,34 @@ fn err(error: impl std::fmt::Display) -> String {
 mod tests {
     use super::*;
     use inslag_state_tree::StateTreePlugin;
+
+    #[test]
+    fn screen_coordinates_remove_dpi_but_not_ui_scale() {
+        let lua = Lua::new();
+        for dpi in [1.0, 1.25, 2.0] {
+            let mut world = World::new();
+            world.insert_resource(UiScale(2.0 / dpi));
+            let entity = world
+                .spawn((
+                    Node::default(),
+                    ComputedNode {
+                        size: Vec2::new(120., 60.),
+                        inverse_scale_factor: 0.5,
+                        ..default()
+                    },
+                    UiGlobalTransform::from(bevy::math::Affine2::from_translation(Vec2::new(
+                        400., 200.,
+                    ))),
+                ))
+                .id();
+            let args = lua.create_table().unwrap();
+            args.set("entity", entity.to_bits().to_string()).unwrap();
+            let point = screen(&world, &lua, &args).unwrap();
+            let point = point.as_table().unwrap();
+            assert_eq!(point.get::<f32>("x").unwrap(), 400. / dpi);
+            assert_eq!(point.get::<f32>("y").unwrap(), 200. / dpi);
+        }
+    }
 
     #[test]
     fn trees_are_constructed_observed_and_checked_without_domain_registration() {

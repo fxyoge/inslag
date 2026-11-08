@@ -1195,7 +1195,7 @@ fn parse_visual_attributes(
                 visual.properties.insert(key, value);
             }
             "bind:x" | "bind:y" | "bind:z" | "bind:scale-x" | "bind:scale-y" | "bind:position"
-            | "bind:scale" | "bind:rotation" => {
+            | "bind:scale" | "bind:rotation" | "bind:bottom" | "bind:right" => {
                 validate_binding_path(&value)
                     .map_err(|message| error(reader, source_name, message))?;
                 visual.bindings.push(KuiBinding::Property {

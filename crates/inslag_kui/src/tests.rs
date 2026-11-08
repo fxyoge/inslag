@@ -318,6 +318,38 @@ fn layout_images_and_containers_can_dispatch_actions() {
     assert_eq!(app.world().resource::<Actions>().0, ["image", "group"]);
 }
 
+#[test]
+fn layout_edge_bindings_update_without_remounting() {
+    let mut app = test_support::app(&[]);
+    let handle = asset_with_images(
+        &mut app,
+        r#"<node id="edge" bind:bottom="offset" bind:right="offset"/>"#,
+    );
+    let owner = app.world_mut().spawn_empty().id();
+    let mut view = KuiView::new(owner, handle);
+    view.data.insert("offset".into(), KuiValue::Integer(24));
+    let mount = app.world_mut().spawn(view).id();
+    app.update();
+    let entity = named(&mut app, "edge");
+    assert_eq!(
+        app.world().get::<Node>(entity).unwrap().bottom,
+        Val::Px(24.)
+    );
+    assert_eq!(app.world().get::<Node>(entity).unwrap().right, Val::Px(24.));
+    app.world_mut()
+        .get_mut::<KuiView>(mount)
+        .unwrap()
+        .data
+        .insert("offset".into(), KuiValue::Integer(48));
+    app.update();
+    assert_eq!(named(&mut app, "edge"), entity);
+    assert_eq!(
+        app.world().get::<Node>(entity).unwrap().bottom,
+        Val::Px(48.)
+    );
+    assert_eq!(app.world().get::<Node>(entity).unwrap().right, Val::Px(48.));
+}
+
 fn item(id: KuiValue, label: &str) -> KuiValue {
     KuiValue::Record(BTreeMap::from([
         ("id".into(), id),

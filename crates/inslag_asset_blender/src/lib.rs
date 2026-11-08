@@ -28,15 +28,27 @@ mod tests;
 #[derive(Clone)]
 pub struct Blender {
     version: [u32; 3],
+    density: u32,
 }
 impl Blender {
     pub fn new(version: [u32; 3]) -> Self {
-        Self { version }
+        Self {
+            version,
+            density: 1,
+        }
+    }
+    pub fn with_texel_density(mut self, density: u32) -> Self {
+        self.density = density.max(1);
+        self
+    }
+    pub fn texel_density(&self) -> u32 {
+        self.density
     }
     pub fn open(&self, source: impl Into<PathBuf>) -> Blend {
         Blend {
             source: source.into(),
             version: self.version,
+            density: self.density,
         }
     }
 }
@@ -44,6 +56,7 @@ impl Blender {
 pub struct Blend {
     source: PathBuf,
     version: [u32; 3],
+    density: u32,
 }
 impl Blend {
     pub fn scene(&self, name: impl Into<String>) -> Scene {
@@ -79,6 +92,7 @@ impl Scene {
             layer: name.into(),
             frames: vec![0],
             resolution: None,
+            framing: None,
         }
     }
 }
@@ -171,10 +185,19 @@ impl RenderedSprites {
     }
     pub fn finish(self) -> Result<Asset<inslag_asset_image::SpriteCollection>> {
         use inslag_asset_image::{Canvas, Pixels, Sprites, Transform};
+        let density = self.scene.blend.density;
+        let size = self.size.map(|value| value.div_ceil(density));
+        let pivot = self.pivot.map(|value| value / density as i32);
+        let samples = if size.iter().any(|value| *value < 2) {
+            4
+        } else {
+            2
+        };
         let resolution = self
             .size
+            .map(|value| value.div_ceil(density))
             .map(|v| {
-                v.checked_mul(2)
+                v.checked_mul(samples)
                     .ok_or_else(|| invalid("supersampled dimensions overflow"))
             })
             .into_iter()
@@ -188,6 +211,7 @@ impl RenderedSprites {
                 self.scene
                     .view_layer(name)
                     .resolution(resolution)
+                    .texel_density(self.size, density)
                     .samples(&self.grid, &axes)
             })
             .transpose()?;
@@ -198,8 +222,9 @@ impl RenderedSprites {
                 .scene
                 .view_layer(&layer.view)
                 .resolution(resolution)
+                .texel_density(self.size, density)
                 .samples(&self.grid, &axes)?;
-            let mut pixels = Pixels::new(raw, self.size);
+            let mut pixels = Pixels::new(raw, size);
             if layer.occluded {
                 pixels = pixels.occluded_by(
                     context
@@ -211,17 +236,17 @@ impl RenderedSprites {
             if layer.opacity != 1.0 || layer.fade.is_some() {
                 let mut transform = Transform::new(image).opacity(layer.opacity);
                 if let Some(fade) = layer.fade {
-                    transform = transform.fade_y(fade);
+                    transform = transform.fade_y(fade.map(|row| row / density as f32));
                 }
                 image = transform.finish();
             }
-            collection.add(&layer.name, image).pivot(self.pivot);
+            collection.add(&layer.name, image).pivot(pivot);
         }
         let rendered = collection.finish();
         let mut collection = Sprites::new();
         collection.extend(rendered.clone());
         for composite in self.composites {
-            let mut canvas = Canvas::new(self.size);
+            let mut canvas = Canvas::new(size);
             for name in composite.layers {
                 let layer =
                     self.layers.iter().find(|l| l.name == name).ok_or_else(|| {
@@ -248,9 +273,7 @@ impl RenderedSprites {
                 };
                 canvas.place(rendered.clone(), slice, [0, 0], frame);
             }
-            collection
-                .add(composite.name, canvas.finish())
-                .pivot(self.pivot);
+            collection.add(composite.name, canvas.finish()).pivot(pivot);
         }
         for imported in self.imports {
             collection.extend(imported);
@@ -267,8 +290,14 @@ pub struct Render {
     layer: String,
     frames: Vec<i32>,
     resolution: Option<[u32; 2]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    framing: Option<[u32; 3]>,
 }
 impl Render {
+    pub fn texel_density(mut self, logical_size: [u32; 2], density: u32) -> Self {
+        self.framing = (density > 1).then_some([logical_size[0], logical_size[1], density]);
+        self
+    }
     pub fn frames(mut self, frames: impl IntoIterator<Item = i32>) -> Self {
         self.frames = frames.into_iter().collect();
         self
@@ -331,7 +360,7 @@ impl Operation for Render {
         fs::write(
             &job,
             serde_json::to_vec(
-                &serde_json::json!({"source":source,"version":self.version,"scene":self.scene,"layer":self.layer,"frames":self.frames,"resolution":self.resolution,"output":ctx.work_dir()}),
+                &serde_json::json!({"source":source,"version":self.version,"scene":self.scene,"layer":self.layer,"frames":self.frames,"resolution":self.resolution,"framing":self.framing,"output":ctx.work_dir()}),
             )?,
         )?;
         let executable = std::env::var_os("BLENDER").unwrap_or_else(|| "blender".into());

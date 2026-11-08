@@ -536,6 +536,9 @@ fn cursor(
     let Ok((window, current)) = windows.single() else {
         return;
     };
+    if current.is_some_and(|icon| icon.as_system().is_none()) {
+        return;
+    }
     let icon = CursorIcon::System(if !drags.0.is_empty() {
         SystemCursorIcon::Grabbing
     } else {
