@@ -1,0 +1,11 @@
+warning: query requests mutable access to `Health`, but only shared access is used
+  --> $DIR/read_only_get.rs:11:24
+   |
+LL | fn update(query: Query<&mut Health>, entity: Entity) {
+   |                        ^^^^^^^^^^^
+   |
+   = help: use `&Health` to avoid unnecessary scheduling conflicts
+   = note: `#[warn(bevy_unnecessary_mut_query)]` on by default
+
+warning: 1 warning emitted
+

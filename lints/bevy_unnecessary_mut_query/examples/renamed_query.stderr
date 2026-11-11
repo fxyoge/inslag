@@ -1,0 +1,11 @@
+warning: query requests mutable access to `Health`, but only shared access is used
+  --> $DIR/renamed_query.rs:11:31
+   |
+LL | fn update(mut query: Entities<&mut Health>) {
+   |                               ^^^^^^^^^^^
+   |
+   = help: use `&Health` to avoid unnecessary scheduling conflicts
+   = note: `#[warn(bevy_unnecessary_mut_query)]` on by default
+
+warning: 1 warning emitted
+

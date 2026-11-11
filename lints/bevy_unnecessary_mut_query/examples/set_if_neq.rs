@@ -1,0 +1,17 @@
+#![expect(dead_code)]
+mod model {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/examples/support/model.rs"
+    ));
+}
+use bevy_ecs::prelude::*;
+use model::Health;
+
+fn update(mut query: Query<&mut Health>) {
+    for mut health in &mut query {
+        health.set_if_neq(Health(1));
+    }
+}
+
+fn main() {}

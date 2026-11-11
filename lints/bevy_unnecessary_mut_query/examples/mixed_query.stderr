@@ -1,0 +1,11 @@
+warning: query requests mutable access to `Sprite`, but only shared access is used
+  --> $DIR/mixed_query.rs:9:44
+   |
+LL | fn update(mut query: Query<(&mut Progress, &mut Sprite)>) {
+   |                                            ^^^^^^^^^^^
+   |
+   = help: use `&Sprite` to avoid unnecessary scheduling conflicts
+   = note: `#[warn(bevy_unnecessary_mut_query)]` on by default
+
+warning: 1 warning emitted
+
