@@ -1,0 +1,59 @@
+warning: query requests component read access, but only membership is used
+  --> $DIR/membership.rs:7:26
+   |
+LL | fn contains(query: Query<&Health>, entity: Entity) -> bool {
+   |                          ^^^^^^^
+   |
+   = help: use `Query<(), With<Health>>` to avoid unnecessary scheduling conflicts
+   = note: `#[warn(bevy_unnecessary_query_read)]` on by default
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/membership.rs:11:23
+   |
+LL | fn empty(query: Query<&Health>) -> bool {
+   |                       ^^^^^^^
+   |
+   = help: use `Query<(), With<Health>>` to avoid unnecessary scheduling conflicts
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/membership.rs:15:22
+   |
+LL | fn both(query: Query<&Health>, entity: Entity) -> bool {
+   |                      ^^^^^^^
+   |
+   = help: use `Query<(), With<Health>>` to avoid unnecessary scheduling conflicts
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/membership.rs:19:23
+   |
+LL | fn tuple(query: Query<(Entity, &Health, (&Shield, ()))>, entity: Entity) -> bool {
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `Query<(), (With<Health>, With<Shield>)>` to avoid unnecessary scheduling conflicts
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/membership.rs:23:27
+   |
+LL | fn duplicate(query: Query<(&Health, &Health)>) -> bool {
+   |                           ^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `Query<(), With<Health>>` to avoid unnecessary scheduling conflicts
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/membership.rs:27:22
+   |
+LL | fn ufcs(query: Query<&Health>, entity: Entity) -> bool {
+   |                      ^^^^^^^
+   |
+   = help: use `Query<(), With<Health>>` to avoid unnecessary scheduling conflicts
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/membership.rs:31:43
+   |
+LL | fn renamed(query: bevy_ecs::system::Query<&Health>) -> bool {
+   |                                           ^^^^^^^
+   |
+   = help: use `Query<(), With<Health>>` to avoid unnecessary scheduling conflicts
+
+warning: 7 warnings emitted
+

@@ -1,0 +1,19 @@
+warning: query requests component read access, but only membership is used
+  --> $DIR/lifetimes.rs:8:38
+   |
+LL | fn explicit<'w, 's>(query: Q<'w, 's, &'static Health>) -> bool {
+   |                                      ^^^^^^^^^^^^^^^
+   |
+   = help: use `Q<'w, 's, (), With<Health>>` to avoid unnecessary scheduling conflicts
+   = note: `#[warn(bevy_unnecessary_query_read)]` on by default
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/lifetimes.rs:12:35
+   |
+LL | fn generic<T: Component>(query: Q<&T, With<Shield>>) -> bool {
+   |                                   ^^
+   |
+   = help: use `Q<(), (With<T>, With<Shield>)>` to avoid unnecessary scheduling conflicts
+
+warning: 2 warnings emitted
+

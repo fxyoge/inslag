@@ -1,0 +1,35 @@
+warning: query requests component read access, but only membership is used
+  --> $DIR/registered.rs:6:27
+   |
+LL | fn condition(query: Query<&Health>) -> bool {
+   |                           ^^^^^^^
+   |
+   = help: use `Query<(), With<Health>>` to avoid unnecessary scheduling conflicts
+   = note: `#[warn(bevy_unnecessary_query_read)]` on by default
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/registered.rs:10:24
+   |
+LL | fn system(query: Query<&Shield>) {
+   |                        ^^^^^^^
+   |
+   = help: use `Query<(), With<Shield>>` to avoid unnecessary scheduling conflicts
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/registered.rs:16:51
+   |
+LL |     Schedule::default().add_systems(|query: Query<&Health>| {
+   |                                                   ^^^^^^^
+   |
+   = help: use `Query<(), With<Health>>` to avoid unnecessary scheduling conflicts
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/registered.rs:19:34
+   |
+LL |     let _closure = |query: Query<&Health>| query.is_empty();
+   |                                  ^^^^^^^
+   |
+   = help: use `Query<(), With<Health>>` to avoid unnecessary scheduling conflicts
+
+warning: 4 warnings emitted
+

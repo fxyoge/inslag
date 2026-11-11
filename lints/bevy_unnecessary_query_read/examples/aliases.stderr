@@ -1,0 +1,27 @@
+warning: query requests component read access, but only membership is used
+  --> $DIR/aliases.rs:7:23
+   |
+LL | fn moved(query: Query<&Health>) -> bool {
+   |                       ^^^^^^^
+   |
+   = help: use `Query<(), With<Health>>` to avoid unnecessary scheduling conflicts
+   = note: `#[warn(bevy_unnecessary_query_read)]` on by default
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/aliases.rs:12:26
+   |
+LL | fn borrowed(query: Query<&Health>) -> bool {
+   |                          ^^^^^^^
+   |
+   = help: use `Query<(), With<Health>>` to avoid unnecessary scheduling conflicts
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/aliases.rs:18:31
+   |
+LL | fn parenthesized(query: Query<&Health>) -> bool {
+   |                               ^^^^^^^
+   |
+   = help: use `Query<(), With<Health>>` to avoid unnecessary scheduling conflicts
+
+warning: 3 warnings emitted
+

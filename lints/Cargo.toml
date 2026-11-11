@@ -5,6 +5,7 @@ members = [
     "bevy_indirect_system_registration",
     "bevy_component_without_producer",
     "bevy_unnecessary_mut_query",
+    "bevy_unnecessary_query_read",
     "unchained_builder",
     "discarded_projection_work",
     "inslag_state_tree_private_access",

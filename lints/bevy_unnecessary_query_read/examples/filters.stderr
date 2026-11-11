@@ -1,0 +1,43 @@
+warning: query requests component read access, but only membership is used
+  --> $DIR/filters.rs:7:29
+   |
+LL | fn with_filter(query: Query<&Health, With<Shield>>) -> bool {
+   |                             ^^^^^^^
+   |
+   = help: use `Query<(), (With<Health>, With<Shield>)>` to avoid unnecessary scheduling conflicts
+   = note: `#[warn(bevy_unnecessary_query_read)]` on by default
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/filters.rs:11:32
+   |
+LL | fn without_filter(query: Query<&Health, Without<Hidden>>) -> bool {
+   |                                ^^^^^^^
+   |
+   = help: use `Query<(), (With<Health>, Without<Hidden>)>` to avoid unnecessary scheduling conflicts
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/filters.rs:15:27
+   |
+LL | fn or_filter(query: Query<&Health, Or<(With<Shield>, Without<Hidden>)>>) -> bool {
+   |                           ^^^^^^^
+   |
+   = help: use `Query<(), (With<Health>, Or<(With<Shield>, Without<Hidden>)>)>` to avoid unnecessary scheduling conflicts
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/filters.rs:19:30
+   |
+LL | fn other_change(query: Query<&Health, Changed<Shield>>) -> bool {
+   |                              ^^^^^^^
+   |
+   = help: use `Query<(), (With<Health>, Changed<Shield>)>` to avoid unnecessary scheduling conflicts
+
+warning: query requests component read access, but only membership is used
+  --> $DIR/filters.rs:23:32
+   |
+LL | fn partial_change(query: Query<(&Health, &Shield), Changed<Health>>) -> bool {
+   |                                ^^^^^^^^^^^^^^^^^^
+   |
+   = help: use `Query<(), ((With<Health>, With<Shield>), Changed<Health>)>` to avoid unnecessary scheduling conflicts
+
+warning: 5 warnings emitted
+

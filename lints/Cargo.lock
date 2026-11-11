@@ -711,6 +711,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_unnecessary_query_read"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "dylint_linting",
+ "dylint_testing",
+]
+
+[[package]]
 name = "bevy_utils"
 version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
