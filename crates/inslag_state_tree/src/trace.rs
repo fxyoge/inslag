@@ -358,13 +358,7 @@ fn write_fault(output: &mut String, fault: &RuntimeFault) {
         RuntimeFault::Effect { effect, .. } => {
             write!(output, "effect {effect:?}").unwrap();
         }
-        RuntimeFault::EventDataProjection { event, .. } => {
-            write!(output, "event-data {event:?}").unwrap();
-        }
         RuntimeFault::Activity { activity, .. } => write!(output, "activity {activity:?}").unwrap(),
-        RuntimeFault::ActivityDataProjection { activity, .. } => {
-            write!(output, "activity-data {activity:?}").unwrap()
-        }
         RuntimeFault::UnknownDataOverride { name } => {
             write!(output, "unknown-data-override {name:?}").unwrap()
         }

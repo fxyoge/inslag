@@ -3,6 +3,15 @@ use proc_macro_crate::{FoundCrate, crate_name};
 use quote::{format_ident, quote};
 use syn::{Data, DeriveInput, Error, LitStr, Path, parse_macro_input, spanned::Spanned};
 
+mod input;
+
+#[proc_macro_derive(StateTreeInput, attributes(state_tree))]
+pub fn derive_state_tree_input(input: TokenStream) -> TokenStream {
+    input::expand(parse_macro_input!(input as DeriveInput), runtime_crate())
+        .unwrap_or_else(Error::into_compile_error)
+        .into()
+}
+
 #[proc_macro_derive(StateTreeEvent, attributes(state_tree, serde))]
 /// Declares one typed external state-tree event payload.
 pub fn derive_state_tree_event(input: TokenStream) -> TokenStream {
@@ -39,11 +48,8 @@ fn expand_state_tree_event_with_runtime(
         quote! {
             fn event_data(
                 &self,
-            ) -> ::core::result::Result<
-                ::core::option::Option<#runtime::LuauValue>,
-                #runtime::StateTreeEventDataError,
-            > {
-                #projector(self).map(::core::option::Option::Some)
+            ) -> ::core::option::Option<#runtime::LuauValue> {
+                ::core::option::Option::Some(#projector(self))
             }
         }
     } else {

@@ -65,8 +65,8 @@ pub(crate) struct FixtureChanged {
 }
 impl StateTreeEvent for FixtureChanged {
     const AUTHORED_NAME: &'static str = "workbench.fixture";
-    fn event_data(&self) -> Result<Option<LuauValue>, StateTreeEventDataError> {
-        Ok(Some(LuauValue::Record(self.data.clone())))
+    fn event_data(&self) -> Option<LuauValue> {
+        Some(LuauValue::Record(self.data.clone()))
     }
 }
 impl EntityStateTreeEvent for FixtureChanged {}
@@ -76,25 +76,7 @@ pub(crate) struct FixturePlugin;
 impl Plugin for FixturePlugin {
     fn build(&self, app: &mut App) {
         app.add_state_tree_event::<FixtureChanged>()
-            .add_state_tree_effect::<ToolAction, _>("workbench.command", |context, args| {
-                let value = match args.take::<LuauValue>("value")? {
-                    LuauValue::Nil => None,
-                    LuauValue::String(value) => Some(value),
-                    _ => {
-                        return Err(StateTreeEffectError::argument(
-                            "value",
-                            "expected string or nil",
-                        ));
-                    }
-                };
-                Ok(ToolAction {
-                    view: context.entity(),
-                    action: args.take("action")?,
-                    value,
-                    position: args.take("position")?,
-                    start: args.take("start")?,
-                })
-            });
+            .add_state_tree_effect::<ToolAction>("workbench.command");
     }
 }
 

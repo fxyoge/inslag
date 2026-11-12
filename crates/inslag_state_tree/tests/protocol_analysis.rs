@@ -25,8 +25,9 @@ struct UsedEvent;
 #[derive(Event, StateTreeEvent)]
 #[state_tree(name = "unused.event", broadcast)]
 struct UnusedEvent;
-#[derive(Message)]
+#[derive(Message, inslag_state_tree::StateTreeInput)]
 struct EffectMessage;
+#[derive(inslag_state_tree::StateTreeInput)]
 struct TestActivity;
 impl StateTreeActivity for TestActivity {
     type Output = ();
@@ -75,10 +76,10 @@ fn configure(config: &mut App) {
     config
         .add_state_tree_event::<UsedEvent>()
         .add_state_tree_event::<UnusedEvent>()
-        .add_state_tree_effect("used.effect", |_, _| Ok(EffectMessage))
-        .add_state_tree_effect("unused.effect", |_, _| Ok(EffectMessage))
-        .add_state_tree_activity("used.activity", |_, _| Ok(TestActivity))
-        .add_state_tree_activity("unused.activity", |_, _| Ok(TestActivity));
+        .add_state_tree_effect::<EffectMessage>("used.effect")
+        .add_state_tree_effect::<EffectMessage>("unused.effect")
+        .add_state_tree_activity::<TestActivity>("used.activity")
+        .add_state_tree_activity::<TestActivity>("unused.activity");
 }
 
 #[test]

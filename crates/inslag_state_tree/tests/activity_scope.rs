@@ -11,13 +11,12 @@ use inslag_state_tree::prelude::*;
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, ScheduleLabel)]
 struct Tick;
 
-struct Work;
-impl StateTreeActivity for Work {
-    type Output = ();
-    type Error = ();
+#[derive(StateTreeInput)]
+struct Work {
+    #[state_tree(activity_id)]
+    id: String,
 }
-struct Other;
-impl StateTreeActivity for Other {
+impl StateTreeActivity for Work {
     type Output = ();
     type Error = ();
 }
@@ -37,28 +36,16 @@ struct Restart {
 struct Notified {
     entity: Entity,
 }
-#[derive(Message)]
-struct Captured(StateTreeActivityToken<Work>);
+#[derive(Message, StateTreeInput)]
+struct Captured(#[state_tree(activity = "activity")] Option<StateTreeActivityToken<Work>>);
 
 fn configure(config: &mut App) {
     config
         .add_state_tree_event::<Capture>()
         .add_state_tree_event::<Restart>()
         .add_state_tree_event::<Notified>()
-        .add_state_tree_activity::<Work, _>("work", |context, _| {
-            assert_eq!(context.activity_id(), Some("task"));
-            Ok(Work)
-        })
-        .add_state_tree_effect::<Captured, _>("capture", |context, _| {
-            assert_eq!(context.activity_id(), None);
-            assert!(context.activity_token::<Other>("task").is_none());
-            assert!(context.activity_token::<Work>("unknown").is_none());
-            Ok(Captured(
-                context
-                    .activity_token::<Work>("task")
-                    .expect("active typed activity"),
-            ))
-        });
+        .add_state_tree_activity::<Work>("work")
+        .add_state_tree_effect::<Captured>("capture");
 }
 
 #[test]
@@ -74,7 +61,7 @@ fn typed_activity_tokens_are_scoped_to_runtime_and_generation() {
     let source = r#"<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:ist="urn:inslag-state-tree" datamodel="luau" initial="active">
       <datamodel><data id="notifications" expr="0"/></datamodel>
       <state id="active"><ist:activity id="task" name="work"/>
-        <transition event="capture"><ist:effect name="capture"/></transition>
+        <transition event="capture"><ist:effect name="capture"><ist:arg name="activity" expr="'task'"/></ist:effect></transition>
         <transition event="restart" target="active"/>
         <transition event="notified"><assign location="notifications" expr="notifications + 1"/></transition>
       </state></scxml>"#;
@@ -91,6 +78,13 @@ fn typed_activity_tokens_are_scoped_to_runtime_and_generation() {
         .spawn(StateTreeInstance::new(handle.clone()))
         .id();
     app.world_mut().run_schedule(Tick);
+    let starts = app
+        .world()
+        .resource::<Messages<StateTreeActivityLifecycle<Work>>>();
+    assert!(starts.get_cursor().read(starts).any(|message| matches!(
+        message,
+        StateTreeActivityLifecycle::Started { activity, .. } if activity.id == "task"
+    )));
     let capture = |app: &mut App| {
         app.world_mut()
             .run_system_once(move |mut events: EntityStateTreeEventWriter| {
@@ -104,6 +98,7 @@ fn typed_activity_tokens_are_scoped_to_runtime_and_generation() {
             .next()
             .unwrap()
             .0
+            .unwrap()
     };
     let first = capture(&mut app);
     assert_eq!(first.entity(), owner);

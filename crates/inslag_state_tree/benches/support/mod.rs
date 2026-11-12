@@ -33,13 +33,8 @@ fn configure_simulation(config: &mut App) {
         .add_state_tree_event::<Tick>()
         .add_state_tree_event::<EntityTick>()
         .add_state_tree_event::<Ignored>()
-        .add_state_tree_effect::<BenchmarkEffect, _>("benchmark", |_context, arguments| {
-            let _: i64 = arguments.take("amount")?;
-            Ok(BenchmarkEffect)
-        })
-        .add_state_tree_activity::<BenchmarkActivity, _>("benchmark", |_context, _arguments| {
-            Ok(BenchmarkActivity)
-        });
+        .add_state_tree_effect::<BenchmarkEffect>("benchmark")
+        .add_state_tree_activity::<BenchmarkActivity>("benchmark");
 }
 
 #[derive(Event, StateTreeEvent)]
@@ -56,9 +51,13 @@ pub(crate) struct EntityTick {
 #[state_tree(name = "ignored", broadcast)]
 pub(crate) struct Ignored;
 
-#[derive(Message)]
-struct BenchmarkEffect;
+#[derive(Message, inslag_state_tree::StateTreeInput)]
+struct BenchmarkEffect {
+    #[state_tree(rename = "amount")]
+    _amount: i64,
+}
 
+#[derive(inslag_state_tree::StateTreeInput)]
 struct BenchmarkActivity;
 
 impl StateTreeActivity for BenchmarkActivity {

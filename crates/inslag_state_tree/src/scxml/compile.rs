@@ -1304,31 +1304,13 @@ mod tests {
 
     fn configure_no_events(config: &mut bevy_app::App) {
         config
-            .add_state_tree_effect::<RecordedEffect, _>("record", |_context, arguments| {
-                Ok(RecordedEffect(arguments.take("value")?))
-            })
-            .add_state_tree_activity::<Work, _>("work", |context, arguments| {
-                let argument_name = { arguments.iter().next().map(|(name, _)| name.to_owned()) };
-                let argument = argument_name
-                    .map(|name| arguments.take::<LuauValue>(&name))
-                    .transpose()?
-                    .unwrap_or(LuauValue::Nil);
-                Ok(Work {
-                    argument,
-                    target: context.data("target").cloned(),
-                })
-            })
-            .add_state_tree_activity::<Work, _>("find_path", |context, arguments| {
-                let argument = arguments.take("destination")?;
-                Ok(Work {
-                    argument,
-                    target: context.data("target").cloned(),
-                })
-            });
+            .add_state_tree_effect::<RecordedEffect>("record")
+            .add_state_tree_activity::<Work>("work")
+            .add_state_tree_activity::<Work>("find_path");
     }
 
-    #[derive(Message)]
-    struct RecordedEffect(i64);
+    #[derive(Message, crate::StateTreeInput)]
+    struct RecordedEffect(#[state_tree(rename = "value")] i64);
 
     #[test]
     fn documents_need_no_domain_and_reject_the_removed_attribute() {
@@ -1347,8 +1329,9 @@ mod tests {
         );
     }
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, crate::StateTreeInput)]
     struct Work {
+        #[state_tree(rename = "destination", default = LuauValue::Nil)]
         argument: LuauValue,
         target: Option<LuauValue>,
     }
@@ -1357,16 +1340,12 @@ mod tests {
         type Output = Option<LuauValue>;
         type Error = Option<LuauValue>;
 
-        fn output_data(
-            output: &Self::Output,
-        ) -> Result<Option<LuauValue>, crate::StateTreeEventDataError> {
-            Ok(output.clone())
+        fn output_data(output: &Self::Output) -> Option<LuauValue> {
+            output.clone()
         }
 
-        fn error_data(
-            error: &Self::Error,
-        ) -> Result<Option<LuauValue>, crate::StateTreeEventDataError> {
-            Ok(error.clone())
+        fn error_data(error: &Self::Error) -> Option<LuauValue> {
+            error.clone()
         }
     }
 
@@ -1964,7 +1943,7 @@ mod tests {
                 <datamodel><data id="target" expr="'north'"/><data id="result"/></datamodel>
                 <state id="active">
                     <onentry><assign location="target" expr="'south'"/></onentry>
-                    <ist:activity id="path" name="find_path"><ist:arg name="destination" expr="target"/></ist:activity>
+                    <ist:activity id="path" name="find_path"><ist:arg name="destination" expr="target"/><ist:arg name="target" expr="target"/></ist:activity>
                     <transition event="done.activity.path" cond="_event.data.ok"><assign location="result" expr="_event.data.route"/></transition>
                 </state>
             </scxml>"#,
@@ -2105,12 +2084,7 @@ mod tests {
     fn configure_reenter(config: &mut bevy_app::App) {
         config
             .add_state_tree_event::<ReenterEvent>()
-            .add_state_tree_activity::<Work, _>("work", |_context, _arguments| {
-                Ok(Work {
-                    argument: LuauValue::Nil,
-                    target: None,
-                })
-            });
+            .add_state_tree_activity::<Work>("work");
     }
 
     #[derive(bevy_ecs::event::Event, crate::StateTreeEvent)]
@@ -2242,12 +2216,8 @@ mod tests {
         amount: i64,
     }
 
-    fn payload_event_data(
-        event: &PayloadEvent,
-    ) -> Result<LuauValue, crate::StateTreeEventDataError> {
-        Ok(LuauValue::Record(
-            [("amount".into(), LuauValue::Integer(event.amount))].into(),
-        ))
+    fn payload_event_data(event: &PayloadEvent) -> LuauValue {
+        LuauValue::Record([("amount".into(), LuauValue::Integer(event.amount))].into())
     }
 
     #[test]
@@ -2282,14 +2252,12 @@ mod tests {
     )]
     struct FailedProjectionEvent;
 
-    fn failed_projection_event_data(
-        _event: &FailedProjectionEvent,
-    ) -> Result<LuauValue, crate::StateTreeEventDataError> {
-        Err(crate::StateTreeEventDataError::new("projection failed"))
+    fn failed_projection_event_data(_event: &FailedProjectionEvent) -> LuauValue {
+        LuauValue::Integer(-1)
     }
 
     #[test]
-    fn event_data_projection_errors_fault_the_instance() {
+    fn event_data_projection_does_not_veto_delivery() {
         let source = format!(
             r#"<scxml xmlns="{NS}" xmlns:ist="urn:inslag-state-tree" datamodel="luau">
                 <state id="source"><transition event="trigger" cond="_event.data ~= nil" target="pass"/></state>
@@ -2304,11 +2272,8 @@ mod tests {
             NonZeroUsize::new(8).unwrap(),
         );
 
-        assert!(!execution.process_event(FailedProjectionEvent));
-        assert!(matches!(
-            execution.status(),
-            InstanceStatus::Faulted(RuntimeFault::EventDataProjection { .. })
-        ));
+        assert!(execution.process_event(FailedProjectionEvent));
+        assert_eq!(execution.status(), &InstanceStatus::Complete);
     }
 
     #[test]

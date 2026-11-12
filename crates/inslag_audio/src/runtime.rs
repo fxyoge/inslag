@@ -10,12 +10,12 @@ use bevy_ecs::prelude::*;
 use bevy_time::{Real, Time};
 use inslag_state_tree::{
     StateTreeActivityLifecycle, StateTreeActivityOutcomeWriter, StateTreeActivityToken,
-    StateTreeEffectError, StateTreeExt, StateTreeInstance, StateTreePlugin, StateTreeSet,
+    StateTreeExt, StateTreeInstance, StateTreePlugin, StateTreeSet,
 };
 
 use crate::{
     AudioDiagnostic, AudioMixer, AudioSettings, EnhancedAudioPlugin, EnhancedAudioSet,
-    state_tree::{BusGain, Play, Playback, Sound, sound},
+    state_tree::{BusGain, Play, Playback, Sound},
 };
 
 type Token = StateTreeActivityToken<Playback>;
@@ -37,27 +37,9 @@ impl Plugin for EnhancedAudioPlugin {
         );
         assert!(app.world().contains_resource::<Time>());
         let schedule = self.schedule;
-        app.add_state_tree_effect("audio.play", |context, args| {
-            Ok(Play {
-                owner: context.entity(),
-                sound: sound(args, false)?,
-            })
-        })
-        .add_state_tree_activity("audio.playback", |_, args| Ok(Playback(sound(args, true)?)))
-        .add_state_tree_effect("audio.set_bus_gain", |context, args| {
-            let bus: String = args.take("bus")?;
-            if bus.is_empty() {
-                return Err(StateTreeEffectError::argument("bus", "bus cannot be empty"));
-            }
-            let gain = args.take("gain")?;
-            crate::mixer::validate_gain(gain)
-                .map_err(|error| StateTreeEffectError::argument("gain", error.to_string()))?;
-            Ok(BusGain {
-                owner: context.entity(),
-                bus,
-                gain,
-            })
-        });
+        app.add_state_tree_effect::<Play>("audio.play")
+            .add_state_tree_activity::<Playback>("audio.playback")
+            .add_state_tree_effect::<BusGain>("audio.set_bus_gain");
         app.init_resource::<AudioSettings>()
             .init_resource::<AudioMixer>()
             .init_resource::<Runtime>()
@@ -83,6 +65,7 @@ struct Request {
     owner: Entity,
     sound: Sound,
     token: Option<Token>,
+    looping: bool,
     queued: Duration,
     sequence: u64,
 }
@@ -134,6 +117,7 @@ impl Runtime {
         owner: Entity,
         sound: Sound,
         token: Option<Token>,
+        looping: bool,
         now: Duration,
     ) -> Request {
         let sequence = self.sequence;
@@ -142,6 +126,7 @@ impl Runtime {
             owner,
             sound,
             token,
+            looping,
             queued: now,
             sequence,
         }
@@ -244,15 +229,23 @@ fn collect_effects(
 ) {
     for message in gains.read() {
         if let Err(error) = mixer.set_authored(&message.bus, message.gain) {
-            diagnostics.write(AudioDiagnostic {
+            tracing::warn!(owner = ?message.owner, bus = %message.bus, %error, "audio.set_bus_gain failed");
+            let diagnostic = AudioDiagnostic {
                 owner: message.owner,
                 src: String::new(),
                 reason: error.to_string(),
-            });
+            };
+            diagnostics.write(diagnostic);
         }
     }
     for message in plays.read() {
-        let request = runtime.request(message.owner, message.sound.clone(), None, time.elapsed());
+        let request = runtime.request(
+            message.owner,
+            message.sound.clone(),
+            None,
+            false,
+            time.elapsed(),
+        );
         runtime.enqueue(request, settings.max_pending);
     }
 }
@@ -296,8 +289,9 @@ fn collect_activities(
                 }
                 let request = runtime.request(
                     token.entity(),
-                    activity.0.clone(),
+                    activity.sound.clone(),
                     Some(*token),
+                    activity.looping,
                     time.elapsed(),
                 );
                 let handle = runtime.source(&request.sound.src, &server, settings.cache_capacity);
@@ -414,6 +408,14 @@ fn advance(
             stop(&voice, &mut context);
             continue;
         }
+        if !voice.request.sound.speed.is_finite() || voice.request.sound.speed <= 0. {
+            fail(
+                &voice,
+                "audio backend requires a finite positive playback speed".into(),
+                &mut context,
+            );
+            continue;
+        }
         let gain = match mixer.gain(&voice.request.sound.bus) {
             Ok(gain) => gain * voice.request.sound.gain,
             Err(error) => {
@@ -421,6 +423,14 @@ fn advance(
                 continue;
             }
         };
+        if !gain.is_finite() {
+            fail(
+                &voice,
+                "audio backend requires a finite gain".into(),
+                &mut context,
+            );
+            continue;
+        }
         match voice.phase {
             Phase::Loading => {
                 if voice.request.token.is_none()
@@ -556,7 +566,7 @@ fn advance(
             }
         }
         let gain = mixer.gain(&voice.request.sound.bus).unwrap() * voice.request.sound.gain;
-        let playback = if voice.request.sound.looping {
+        let playback = if voice.request.looping {
             PlaybackSettings::LOOP
         } else {
             PlaybackSettings::ONCE
@@ -578,11 +588,12 @@ fn fail(voice: &Voice, reason: String, context: &mut PlaybackContext) {
         context.outcomes.fail(token, reason.clone());
     }
     tracing::warn!(src = %voice.request.sound.src, %reason, "audio playback failed");
-    context.diagnostics.write(AudioDiagnostic {
+    let diagnostic = AudioDiagnostic {
         owner: voice.request.owner,
         src: voice.request.sound.src.to_string(),
         reason,
-    });
+    };
+    context.diagnostics.write(diagnostic);
     stop(voice, context);
 }
 

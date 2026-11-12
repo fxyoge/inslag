@@ -21,7 +21,7 @@ use bevy_ecs::prelude::Local;
 use crate::{
     EntityStateTreeEvent, EntityStateTreeEventWriter, StateTreeActivity, StateTreeActivityArgs,
     StateTreeActivityContext, StateTreeActivityError, StateTreeActivityLifecycle,
-    StateTreeActivityToken, StateTreeInstance, StateTreeSet,
+    StateTreeActivityToken, StateTreeInput, StateTreeInstance, StateTreeSet,
 };
 
 /// Describes one global value observed by state-tree activities.
@@ -97,6 +97,15 @@ impl<B: Send + Sync + 'static> Default for StateTreeBindingSet<B> {
 
 struct GlobalBindingActivity<B>(Arc<B>);
 
+impl<B: StateTreeInput> StateTreeInput for GlobalBindingActivity<B> {
+    fn from_state_tree_input(
+        context: &StateTreeActivityContext<'_>,
+        arguments: &mut StateTreeActivityArgs,
+    ) -> Result<Self, StateTreeActivityError> {
+        B::from_state_tree_input(context, arguments).map(|binding| Self(Arc::new(binding)))
+    }
+}
+
 impl<B: Send + Sync + 'static> StateTreeActivity for GlobalBindingActivity<B> {
     type Output = ();
     type Error = ();
@@ -140,20 +149,9 @@ pub(crate) fn has_pending(pending: Option<Res<PendingGlobalBindings>>) -> bool {
     pending.is_some_and(|pending| !pending.installs.is_empty())
 }
 
-pub(crate) fn register_global_binding<B, C, S, M>(
-    world: &mut World,
-    name: Box<str>,
-    constructor: C,
-    source: S,
-) where
-    B: StateTreeBinding,
-    C: Fn(
-            StateTreeActivityContext<'_>,
-            &mut StateTreeActivityArgs,
-        ) -> Result<B, StateTreeActivityError>
-        + Send
-        + Sync
-        + 'static,
+pub(crate) fn register_global_binding<B, S, M>(world: &mut World, name: Box<str>, source: S)
+where
+    B: StateTreeBinding + StateTreeInput,
     S: IntoSystem<(), B::Value, M> + 'static,
 {
     assert!(
@@ -191,13 +189,9 @@ pub(crate) fn register_global_binding<B, C, S, M>(
                 world,
                 crate::protocol::RegistrationOrigin::Application,
             );
-            crate::activity::register_activity::<GlobalBindingActivity<B>, _>(
+            crate::activity::register_activity::<GlobalBindingActivity<B>>(
                 world,
                 name,
-                move |context, arguments| {
-                    constructor(context, arguments)
-                        .map(|binding| GlobalBindingActivity(Arc::new(binding)))
-                },
                 crate::protocol::RegistrationOrigin::Application,
             );
         }));
@@ -364,10 +358,7 @@ mod tests {
     use bevy_time::TimePlugin;
 
     use super::*;
-    use crate::{
-        LuauValue, StateTreeDefinition, StateTreeEvent, StateTreeEventDataError, StateTreePlugin,
-        scxml,
-    };
+    use crate::{LuauValue, StateTreeDefinition, StateTreeEvent, StateTreePlugin, scxml};
 
     #[test]
     #[should_panic(expected = "state-tree activity `ist.spawn` was registered more than once")]
@@ -378,14 +369,10 @@ mod tests {
             AssetPlugin::default(),
             StateTreePlugin::new(Update),
         ))
-        .add_state_tree_global_binding(
-            "ist.spawn",
-            |_, _| Ok(SampleBinding),
-            sample_value,
-        );
+        .add_state_tree_global_binding::<SampleBinding, _, _>("ist.spawn", sample_value);
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, crate::StateTreeInput)]
     #[cfg_attr(feature = "persistence", derive(serde::Serialize, serde::Deserialize))]
     struct SampleBinding;
 
@@ -449,8 +436,8 @@ mod tests {
         value: SampleValue,
     }
 
-    fn project_sample(event: &SampleChanged) -> Result<LuauValue, StateTreeEventDataError> {
-        Ok(LuauValue::Record(BTreeMap::from([
+    fn project_sample(event: &SampleChanged) -> LuauValue {
+        LuauValue::Record(BTreeMap::from([
             (
                 "mode".into(),
                 LuauValue::String(
@@ -462,7 +449,7 @@ mod tests {
                 ),
             ),
             ("label".into(), LuauValue::String(event.value.label.clone())),
-        ])))
+        ]))
     }
 
     #[test]
@@ -555,11 +542,8 @@ mod tests {
                 .get::<crate::StateTreeLinkFailure>(entity)
                 .is_some()
         );
-        app.world_mut().add_state_tree_global_binding(
-            "bind.sample",
-            |_, _| Ok(SampleBinding),
-            sample_value,
-        );
+        app.world_mut()
+            .add_state_tree_global_binding::<SampleBinding, _, _>("bind.sample", sample_value);
         app.update();
         app.update();
         assert!(
@@ -574,7 +558,7 @@ mod tests {
     #[test]
     fn binding_can_precede_plugin_installation() {
         let mut app = App::new();
-        app.add_state_tree_global_binding("bind.sample", |_, _| Ok(SampleBinding), sample_value)
+        app.add_state_tree_global_binding::<SampleBinding, _, _>("bind.sample", sample_value)
             .add_plugins((
                 TimePlugin,
                 AssetPlugin::default(),
@@ -597,9 +581,8 @@ mod tests {
             if !*added {
                 *added = true;
                 commands.queue(|world: &mut World| {
-                    world.add_state_tree_global_binding(
+                    world.add_state_tree_global_binding::<SampleBinding, _, _>(
                         "bind.sample",
-                        |_, _| Ok(SampleBinding),
                         sample_value,
                     );
                 });
@@ -673,9 +656,8 @@ mod tests {
             if !*added {
                 *added = true;
                 commands.queue(|world: &mut World| {
-                    world.add_state_tree_global_binding(
+                    world.add_state_tree_global_binding::<SampleBinding, _, _>(
                         "bind.sample",
-                        |_, _| Ok(SampleBinding),
                         sample_value,
                     );
                 });
@@ -970,11 +952,7 @@ mod tests {
 
     fn configure_binding(config: &mut App) {
         config
-            .add_state_tree_global_binding(
-                "bind.sample",
-                |_context, _arguments| Ok(SampleBinding),
-                sample_value,
-            )
+            .add_state_tree_global_binding::<SampleBinding, _, _>("bind.sample", sample_value)
             .add_state_tree_event::<SampleChanged>();
     }
 }

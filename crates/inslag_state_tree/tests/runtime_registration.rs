@@ -16,9 +16,10 @@ struct Early {
 #[state_tree(name = "late", broadcast)]
 struct Late;
 
-#[derive(Message)]
-struct Published(Entity);
+#[derive(Message, inslag_state_tree::StateTreeInput)]
+struct Published(#[state_tree(owner)] Entity);
 
+#[derive(inslag_state_tree::StateTreeInput)]
 struct Work;
 
 impl StateTreeActivity for Work {
@@ -78,8 +79,8 @@ const RUNNING: &str = r#"
 fn additions_can_precede_plugin_installation() {
     let mut app = App::new();
     app.add_state_tree_event::<Late>()
-        .add_state_tree_effect("publish", |context, _| Ok(Published(context.entity())))
-        .add_state_tree_activity("work", |_, _| Ok(Work))
+        .add_state_tree_effect::<Published>("publish")
+        .add_state_tree_activity::<Work>("work")
         .add_plugins((
             TimePlugin,
             AssetPlugin::default(),
@@ -143,7 +144,7 @@ fn missing_registrations_arrive_incrementally_and_typed_messages_are_maintained(
     ));
 
     app.world_mut()
-        .add_state_tree_effect("publish", |context, _| Ok(Published(context.entity())));
+        .add_state_tree_effect::<Published>("publish");
     app.update();
     assert_eq!(
         app.world()
@@ -155,8 +156,7 @@ fn missing_registrations_arrive_incrementally_and_typed_messages_are_maintained(
         1
     );
 
-    app.world_mut()
-        .add_state_tree_activity("work", |_, _| Ok(Work));
+    app.world_mut().add_state_tree_activity::<Work>("work");
     app.update();
     assert!(app.world().get::<StateTreeLinkFailure>(entity).is_none());
     assert_eq!(
@@ -191,7 +191,7 @@ fn missing_registrations_arrive_incrementally_and_typed_messages_are_maintained(
 fn event_addition_preserves_queued_events_data_timers_and_activity_tokens() {
     let mut app = app();
     app.add_state_tree_event::<Early>()
-        .add_state_tree_activity("work", |_, _| Ok(Work));
+        .add_state_tree_activity::<Work>("work");
     let first = spawn(app.world_mut(), RUNNING);
     let handle = app
         .world()
@@ -280,7 +280,7 @@ fn event_addition_preserves_queued_events_data_timers_and_activity_tokens() {
 fn commands_can_add_and_deliver_an_event_in_the_same_schedule_run() {
     let mut app = app();
     app.add_state_tree_event::<Early>()
-        .add_state_tree_activity("work", |_, _| Ok(Work));
+        .add_state_tree_activity::<Work>("work");
     let entity = spawn(app.world_mut(), RUNNING);
     app.update();
     app.add_systems(

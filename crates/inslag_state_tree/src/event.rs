@@ -9,21 +9,6 @@ use thiserror::Error;
 
 use crate::{LuauValue, protocol::RegistrationOrigin};
 
-/// An error while projecting a typed external event for Luau `_event.data`.
-#[derive(Clone, Debug, Eq, Error, PartialEq)]
-#[error("{message}")]
-pub struct StateTreeEventDataError {
-    message: Box<str>,
-}
-
-impl StateTreeEventDataError {
-    pub fn new(message: impl Into<Box<str>>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-}
-
 /// One external event payload accepted by state trees.
 ///
 /// Implementations are normally generated with
@@ -33,8 +18,8 @@ pub trait StateTreeEvent: Event {
     const AUTHORED_NAME: &'static str;
 
     /// Projects this event's typed payload for lazy Luau `_event.data` access.
-    fn event_data(&self) -> Result<Option<LuauValue>, StateTreeEventDataError> {
-        Ok(None)
+    fn event_data(&self) -> Option<LuauValue> {
+        None
     }
 }
 
@@ -258,7 +243,7 @@ impl<'a> StateTreeEventRef<'a> {
         self.payload.is::<T>()
     }
 
-    pub(crate) fn event_data(self) -> Result<Option<LuauValue>, StateTreeEventDataError> {
+    pub(crate) fn event_data(self) -> Option<LuauValue> {
         (self.entry.event_data)(self.payload)
     }
 
@@ -355,21 +340,15 @@ impl QueuedStateTreeEvent {
     }
 }
 
-type EventDataProjector =
-    fn(&(dyn Any + Send + Sync)) -> Result<Option<LuauValue>, StateTreeEventDataError>;
+type EventDataProjector = fn(&(dyn Any + Send + Sync)) -> Option<LuauValue>;
 
-fn project_event_data<E>(
-    payload: &(dyn Any + Send + Sync),
-) -> Result<Option<LuauValue>, StateTreeEventDataError>
+fn project_event_data<E>(payload: &(dyn Any + Send + Sync)) -> Option<LuauValue>
 where
     E: StateTreeEvent,
 {
-    let payload = payload.downcast_ref::<E>().ok_or_else(|| {
-        StateTreeEventDataError::new(format!(
-            "registered event payload did not contain `{}`",
-            type_name::<E>()
-        ))
-    })?;
+    let payload = payload
+        .downcast_ref::<E>()
+        .expect("registered event payload type must match its registry entry");
     payload.event_data()
 }
 
@@ -427,9 +406,9 @@ mod tests {
     impl StateTreeEvent for Projected {
         const AUTHORED_NAME: &'static str = "projected";
 
-        fn event_data(&self) -> Result<Option<LuauValue>, StateTreeEventDataError> {
+        fn event_data(&self) -> Option<LuauValue> {
             PROJECTIONS.fetch_add(1, Ordering::Relaxed);
-            Ok(Some(LuauValue::Integer(self.0)))
+            Some(LuauValue::Integer(self.0))
         }
     }
 
@@ -577,7 +556,7 @@ mod tests {
         assert_eq!(view.authored_name(), "projected");
         assert!(view.is::<Projected>());
         assert_eq!(PROJECTIONS.load(Ordering::Relaxed), 0);
-        assert_eq!(view.event_data().unwrap(), Some(LuauValue::Integer(23)));
+        assert_eq!(view.event_data(), Some(LuauValue::Integer(23)));
         assert_eq!(PROJECTIONS.load(Ordering::Relaxed), 1);
     }
 }

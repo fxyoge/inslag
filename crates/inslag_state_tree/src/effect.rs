@@ -42,6 +42,12 @@ impl StateTreeEffectError {
     }
 }
 
+impl From<std::convert::Infallible> for StateTreeEffectError {
+    fn from(error: std::convert::Infallible) -> Self {
+        match error {}
+    }
+}
+
 /// Immutable execution context supplied to a typed state-tree constructor.
 pub struct StateTreeContext<'a> {
     pub(crate) entity: Entity,
@@ -50,6 +56,7 @@ pub struct StateTreeContext<'a> {
     pub(crate) data_names: &'a [Box<str>],
     pub(crate) data: &'a [LuauValue],
     pub(crate) activity_id: Option<&'a str>,
+    pub(crate) effect_name: Option<&'a str>,
     pub(crate) activities: Option<(
         &'a crate::definition::LinkedDefinition,
         &'a [crate::instance::ActivitySlot],
@@ -58,6 +65,10 @@ pub struct StateTreeContext<'a> {
 }
 
 impl<'a> StateTreeContext<'a> {
+    pub fn effect_name(&self) -> Option<&str> {
+        self.effect_name
+    }
+
     /// Authored ID of the activity being constructed, absent for effects.
     pub fn activity_id(&self) -> Option<&str> {
         self.activity_id
@@ -133,6 +144,15 @@ impl StateTreeArgs {
         Self { values }
     }
 
+    pub fn from_record(values: std::collections::BTreeMap<String, LuauValue>) -> Self {
+        Self::new(
+            values
+                .into_iter()
+                .map(|(name, value)| (name.into(), value))
+                .collect(),
+        )
+    }
+
     /// Takes and converts a required argument.
     pub fn take<T: FromStateTreeValue>(&mut self, name: &str) -> Result<T, StateTreeEffectError> {
         let Some(index) = self
@@ -140,6 +160,9 @@ impl StateTreeArgs {
             .iter()
             .position(|(candidate, _)| candidate.as_ref() == name)
         else {
+            if let Some(value) = T::missing_value() {
+                return Ok(value);
+            }
             return Err(StateTreeEffectError::argument(
                 name,
                 "required state-tree argument is missing",
@@ -167,7 +190,23 @@ impl StateTreeArgs {
         }
     }
 
-    pub(crate) fn finish(self) -> Result<(), StateTreeEffectError> {
+    pub fn take_or_else<T: FromStateTreeValue>(
+        &mut self,
+        name: &str,
+        default: impl FnOnce() -> T,
+    ) -> Result<T, StateTreeEffectError> {
+        if self
+            .values
+            .iter()
+            .any(|(candidate, _)| candidate.as_ref() == name)
+        {
+            self.take(name)
+        } else {
+            Ok(default())
+        }
+    }
+
+    pub fn finish(self) -> Result<(), StateTreeEffectError> {
         if let Some((name, _)) = self.values.first() {
             return Err(StateTreeEffectError::argument(
                 Box::<str>::from(name.as_ref()),
@@ -195,6 +234,10 @@ pub type StateTreeActivityError = StateTreeEffectError;
 /// Converts a portable Luau value into a Rust effect argument.
 pub trait FromStateTreeValue: Sized {
     fn from_state_tree_value(value: LuauValue) -> Result<Self, Box<str>>;
+
+    fn missing_value() -> Option<Self> {
+        None
+    }
 }
 
 impl FromStateTreeValue for LuauValue {
@@ -254,10 +297,10 @@ impl FromStateTreeValue for f64 {
 impl FromStateTreeValue for f32 {
     fn from_state_tree_value(value: LuauValue) -> Result<Self, Box<str>> {
         let value = f64::from_state_tree_value(value)?;
-        if value.is_finite() && value >= f32::MIN as f64 && value <= f32::MAX as f64 {
+        if !value.is_finite() || (value >= f32::MIN as f64 && value <= f32::MAX as f64) {
             Ok(value as f32)
         } else {
-            Err("number is outside the finite f32 range".into())
+            Err("number is outside the f32 range".into())
         }
     }
 }
@@ -273,18 +316,13 @@ pub(crate) trait RegisteredEffect: Send + Sync {
     ) -> Result<(), StateTreeEffectError>;
 }
 
-struct MessageEffect<M, F> {
-    constructor: F,
+struct MessageEffect<M> {
     marker: PhantomData<fn() -> M>,
 }
 
-impl<M, F> RegisteredEffect for MessageEffect<M, F>
+impl<M> RegisteredEffect for MessageEffect<M>
 where
-    M: Message,
-    F: Fn(StateTreeEffectContext<'_>, &mut StateTreeEffectArgs) -> Result<M, StateTreeEffectError>
-        + Send
-        + Sync
-        + 'static,
+    M: Message + crate::StateTreeInput,
 {
     #[cfg(feature = "persistence")]
     fn clear_messages(&self, world: &mut bevy_ecs::world::World) {
@@ -298,7 +336,7 @@ where
         mut arguments: StateTreeEffectArgs,
         commands: &ParallelCommands<'_, '_>,
     ) -> Result<(), StateTreeEffectError> {
-        let message = (self.constructor)(context, &mut arguments)?;
+        let message = M::from_state_tree_input(&context, &mut arguments)?;
         arguments.finish()?;
         commands.command_scope(move |mut commands| {
             commands.write_message(message);
@@ -346,17 +384,9 @@ impl RuntimeEffectSink for BevyEffectSink<'_, '_, '_> {
     }
 }
 
-pub(crate) fn register_effect<M, F>(
-    world: &mut World,
-    name: Box<str>,
-    constructor: F,
-    origin: RegistrationOrigin,
-) where
-    M: Message,
-    F: Fn(StateTreeEffectContext<'_>, &mut StateTreeEffectArgs) -> Result<M, StateTreeEffectError>
-        + Send
-        + Sync
-        + 'static,
+pub(crate) fn register_effect<M>(world: &mut World, name: Box<str>, origin: RegistrationOrigin)
+where
+    M: Message + crate::StateTreeInput,
 {
     assert!(!name.is_empty(), "state-tree effect names cannot be empty");
     assert!(
@@ -370,8 +400,7 @@ pub(crate) fn register_effect<M, F>(
     let mut registry = world.resource_mut::<StateTreeEffectRegistry>();
     registry.effects.insert(
         name.clone(),
-        Arc::new(MessageEffect::<M, F> {
-            constructor,
+        Arc::new(MessageEffect::<M> {
             marker: PhantomData,
         }),
     );
@@ -386,23 +415,21 @@ mod tests {
 
     use super::*;
 
-    #[derive(Message)]
+    #[derive(Message, crate::StateTreeInput)]
     struct TestEffect;
 
     #[test]
     #[should_panic(expected = "state-tree effect `duplicate` was registered more than once")]
     fn effect_names_must_be_unique() {
         let mut world = World::new();
-        register_effect::<TestEffect, _>(
+        register_effect::<TestEffect>(
             &mut world,
             "duplicate".into(),
-            |_context, _arguments| Ok(TestEffect),
             RegistrationOrigin::Application,
         );
-        register_effect::<TestEffect, _>(
+        register_effect::<TestEffect>(
             &mut world,
             "duplicate".into(),
-            |_context, _arguments| Ok(TestEffect),
             RegistrationOrigin::Application,
         );
     }

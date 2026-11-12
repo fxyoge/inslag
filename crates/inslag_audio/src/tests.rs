@@ -109,20 +109,9 @@ fn app_with_schedule(schedule: impl ScheduleLabel) -> App {
         handles: HashMap::new(),
     })
     .add_message::<AudioDiagnostic>()
-    .add_state_tree_effect("audio.play", |context, args| {
-        Ok(Play {
-            owner: context.entity(),
-            sound: sound(args, false)?,
-        })
-    })
-    .add_state_tree_activity("audio.playback", |_, args| Ok(Playback(sound(args, true)?)))
-    .add_state_tree_effect("audio.set_bus_gain", |context, args| {
-        Ok(BusGain {
-            owner: context.entity(),
-            bus: args.take("bus")?,
-            gain: args.take("gain")?,
-        })
-    })
+    .add_state_tree_effect::<Play>("audio.play")
+    .add_state_tree_activity::<Playback>("audio.playback")
+    .add_state_tree_effect::<BusGain>("audio.set_bus_gain")
     .add_systems(
         schedule,
         collect_activities.in_set(StateTreeSet::HandleActivities),
@@ -516,12 +505,11 @@ fn loading_and_cache_are_bounded_and_stale_one_shots_expire() {
 }
 
 #[test]
-fn invalid_arguments_fault_instead_of_becoming_playback_requests() {
+fn playback_values_are_not_domain_admitted_during_decoding() {
     for extra in [
         r#"<ist:arg name="speed" expr="0"/>"#,
         r#"<ist:arg name="gain" expr="2"/>"#,
         r#"<ist:arg name="limit" expr="0"/>"#,
-        r#"<ist:arg name="loop" expr="true"/>"#,
     ] {
         let mut app = app();
         let owner = chart(
@@ -532,15 +520,35 @@ fn invalid_arguments_fault_instead_of_becoming_playback_requests() {
             ),
         );
         app.update();
-        assert!(matches!(
+        assert_eq!(
             app.world()
                 .get::<StateTreeInstance>(owner)
                 .unwrap()
                 .status(),
-            InstanceStatus::Faulted(_)
-        ));
-        assert!(paths(&app).is_empty());
+            &InstanceStatus::Running
+        );
     }
+}
+
+#[test]
+fn backend_speed_failure_is_diagnosed_without_faulting_the_chart() {
+    let mut app = app();
+    let owner = chart(
+        &mut app,
+        &format!(
+            r#"<state id="active"><onentry>{}</onentry></state>"#,
+            play("sound.wav", r#"<ist:arg name="speed" expr="0"/>"#),
+        ),
+    );
+    app.update();
+    let tree = app.world().get::<StateTreeInstance>(owner).unwrap();
+    assert_eq!(tree.status(), &InstanceStatus::Running);
+    let diagnostics = app.world().resource::<Messages<AudioDiagnostic>>();
+    let mut cursor = diagnostics.get_cursor();
+    let diagnostic = cursor.read(diagnostics).next().unwrap();
+    assert_eq!(diagnostic.owner, owner);
+    assert!(diagnostic.reason.contains("speed"));
+    assert!(paths(&app).is_empty());
 }
 
 #[test]

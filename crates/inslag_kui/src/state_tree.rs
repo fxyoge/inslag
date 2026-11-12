@@ -28,9 +28,8 @@ use std::collections::BTreeMap;
 use bevy::prelude::*;
 use inslag_state_tree::{
     EntityStateTreeEvent, EntityStateTreeEventWriter, InstanceStatus, LuauValue, StateTreeActivity,
-    StateTreeActivityArgs, StateTreeActivityContext, StateTreeActivityError,
     StateTreeActivityLifecycle, StateTreeActivityOutcomeWriter, StateTreeActivityToken,
-    StateTreeEvent, StateTreeEventDataError, StateTreeExt, StateTreeInstance, StateTreeSet,
+    StateTreeEvent, StateTreeExt, StateTreeInput, StateTreeInstance, StateTreeSet,
 };
 
 use crate::{
@@ -38,51 +37,30 @@ use crate::{
     KuiView, KuiViewStatus, validate_asset_path,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, StateTreeInput)]
 struct UiRender {
+    #[state_tree(activity_id)]
     id: String,
     pub src: String,
-    pub world_space: bool,
+    #[state_tree(default)]
+    space: RenderSpace,
+}
+
+#[derive(Clone, Copy, Debug, Default, StateTreeInput)]
+#[state_tree(rename_all = "snake_case")]
+enum RenderSpace {
+    #[default]
+    Layout,
+    World,
 }
 
 impl StateTreeActivity for UiRender {
     type Output = ();
     type Error = String;
 
-    fn error_data(error: &Self::Error) -> Result<Option<LuauValue>, StateTreeEventDataError> {
-        Ok(Some(LuauValue::String(error.clone())))
+    fn error_data(error: &Self::Error) -> Option<LuauValue> {
+        Some(LuauValue::String(error.clone()))
     }
-}
-
-fn ui_render_activity(
-    context: StateTreeActivityContext<'_>,
-    arguments: &mut StateTreeActivityArgs,
-) -> Result<UiRender, StateTreeActivityError> {
-    let src = arguments.take::<String>("src")?;
-    validate_asset_path(&src).map_err(|message| {
-        StateTreeActivityError::argument("src", format!("invalid UI view asset path: {message}"))
-    })?;
-    if !src.ends_with(".kui") {
-        return Err(StateTreeActivityError::argument(
-            "src",
-            "UI view asset path must end in .kui",
-        ));
-    }
-    let space = arguments.take_or::<String>("space", "layout".into())?;
-    if !matches!(space.as_str(), "layout" | "world") {
-        return Err(StateTreeActivityError::argument(
-            "space",
-            "expected layout or world",
-        ));
-    }
-    Ok(UiRender {
-        id: context
-            .activity_id()
-            .expect("activity constructor has an ID")
-            .into(),
-        src,
-        world_space: space == "world",
-    })
 }
 
 #[derive(Clone, Debug, EntityEvent)]
@@ -97,8 +75,8 @@ struct UiAction {
 impl StateTreeEvent for UiAction {
     const AUTHORED_NAME: &'static str = "ui.action";
 
-    fn event_data(&self) -> Result<Option<LuauValue>, StateTreeEventDataError> {
-        Ok(Some(LuauValue::Record(BTreeMap::from([
+    fn event_data(&self) -> Option<LuauValue> {
+        Some(LuauValue::Record(BTreeMap::from([
             ("view".into(), LuauValue::String(self.view.clone())),
             ("action".into(), LuauValue::String(self.action.clone())),
             (
@@ -109,7 +87,7 @@ impl StateTreeEvent for UiAction {
             ),
             ("position".into(), project_position(self.data.position)),
             ("start".into(), project_position(self.data.start)),
-        ]))))
+        ])))
     }
 }
 impl EntityStateTreeEvent for UiAction {}
@@ -121,11 +99,11 @@ struct UiReady {
     view: String,
 }
 
-fn view_event_data(event: &UiReady) -> Result<LuauValue, StateTreeEventDataError> {
-    Ok(LuauValue::Record(BTreeMap::from([(
+fn view_event_data(event: &UiReady) -> LuauValue {
+    LuauValue::Record(BTreeMap::from([(
         "view".into(),
         LuauValue::String(event.view.clone()),
-    )])))
+    )]))
 }
 
 #[derive(Clone, Debug, EntityEvent, inslag_state_tree::StateTreeEvent)]
@@ -135,11 +113,11 @@ struct UiFocusChanged {
     view: String,
 }
 
-fn focus_event_data(event: &UiFocusChanged) -> Result<LuauValue, StateTreeEventDataError> {
-    Ok(LuauValue::Record(BTreeMap::from([(
+fn focus_event_data(event: &UiFocusChanged) -> LuauValue {
+    LuauValue::Record(BTreeMap::from([(
         "view".into(),
         LuauValue::String(event.view.clone()),
-    )])))
+    )]))
 }
 
 enum Movement {
@@ -148,24 +126,30 @@ enum Movement {
     Activate,
 }
 
-#[derive(Message)]
-struct Navigation {
-    token: StateTreeActivityToken<UiRender>,
-    movement: Movement,
+#[derive(Clone, Copy, StateTreeInput)]
+#[state_tree(rename_all = "snake_case")]
+enum Direction {
+    Next,
+    Previous,
 }
 
-fn navigation(
-    context: inslag_state_tree::StateTreeEffectContext<'_>,
-    view: &str,
-    movement: Movement,
-) -> Result<Navigation, inslag_state_tree::StateTreeEffectError> {
-    let token = context.activity_token::<UiRender>(view).ok_or_else(|| {
-        inslag_state_tree::StateTreeEffectError::argument(
-            "view",
-            "expected an active ui.render activity ID",
-        )
-    })?;
-    Ok(Navigation { token, movement })
+#[derive(Message, StateTreeInput)]
+enum Navigation {
+    #[state_tree(name = "ui.focus")]
+    Focus {
+        #[state_tree(owner)]
+        owner: Entity,
+        #[state_tree(activity = "view")]
+        token: Option<StateTreeActivityToken<UiRender>>,
+        direction: Direction,
+    },
+    #[state_tree(name = "ui.activate")]
+    Activate {
+        #[state_tree(owner)]
+        owner: Entity,
+        #[state_tree(activity = "view")]
+        token: Option<StateTreeActivityToken<UiRender>>,
+    },
 }
 
 fn project_position(position: Option<Vec2>) -> LuauValue {
@@ -192,26 +176,9 @@ impl Plugin for KuiStateTreePlugin {
         app.add_state_tree_event::<UiAction>()
             .add_state_tree_event::<UiReady>()
             .add_state_tree_event::<UiFocusChanged>()
-            .add_state_tree_activity::<UiRender, _>("ui.render", ui_render_activity)
-            .add_state_tree_effect::<Navigation, _>("ui.focus", |context, args| {
-                let view = args.take::<String>("view")?;
-                let direction = args.take::<String>("direction")?;
-                let movement = match direction.as_str() {
-                    "next" => Movement::Next,
-                    "previous" => Movement::Previous,
-                    _ => {
-                        return Err(inslag_state_tree::StateTreeEffectError::argument(
-                            "direction",
-                            "expected next or previous",
-                        ));
-                    }
-                };
-                navigation(context, &view, movement)
-            })
-            .add_state_tree_effect::<Navigation, _>("ui.activate", |context, args| {
-                let view = args.take::<String>("view")?;
-                navigation(context, &view, Movement::Activate)
-            })
+            .add_state_tree_activity::<UiRender>("ui.render")
+            .add_state_tree_effect::<Navigation>("ui.focus")
+            .add_state_tree_effect::<Navigation>("ui.activate")
             .init_resource::<ViewIndex>();
         if !app.is_plugin_added::<bevy::input_focus::InputFocusPlugin>() {
             app.add_plugins(bevy::input_focus::InputFocusPlugin);
@@ -284,13 +251,18 @@ fn manage_activities(
     mut lifecycle: MessageReader<StateTreeActivityLifecycle<UiRender>>,
     asset_server: Res<AssetServer>,
     mut commands: Commands,
+    mut outcomes: StateTreeActivityOutcomeWriter<UiRender>,
 ) {
     for lifecycle in lifecycle.read() {
         match lifecycle {
             StateTreeActivityLifecycle::Started { token, activity } => {
+                if let Err(error) = validate_asset_path(&activity.src) {
+                    outcomes.fail(*token, error.into());
+                    continue;
+                }
                 let token = *token;
                 let asset = asset_server.load::<KuiAsset>(activity.src.clone());
-                let world_space = activity.world_space;
+                let world_space = matches!(activity.space, RenderSpace::World);
                 let id = activity.id.clone();
                 commands.queue(move |world: &mut World| {
                     if world
@@ -615,22 +587,43 @@ fn navigate(
     mut events: EntityStateTreeEventWriter,
 ) {
     for request in requests.read() {
+        let (owner, token, movement) = match request {
+            Navigation::Focus {
+                owner,
+                token,
+                direction,
+            } => (
+                *owner,
+                *token,
+                match direction {
+                    Direction::Next => Movement::Next,
+                    Direction::Previous => Movement::Previous,
+                },
+            ),
+            Navigation::Activate { owner, token } => (*owner, *token, Movement::Activate),
+        };
+        let Some(token) = token else {
+            warn!(?owner, "UI navigation: view activity is not active");
+            continue;
+        };
         if !controllers
-            .get(request.token.entity())
-            .is_ok_and(|tree| tree.is_activity_active(request.token))
+            .get(token.entity())
+            .is_ok_and(|tree| tree.is_activity_active(token))
         {
             continue;
         }
-        let Some(entity) = index.0.get(&request.token).copied() else {
+        let Some(entity) = index.0.get(&token).copied() else {
+            warn!(?owner, "UI navigation: view is unavailable");
             continue;
         };
         let Ok((mount, view, mut scope)) = views.get_mut(entity) else {
             continue;
         };
         if view.status() != &KuiViewStatus::Ready {
+            warn!(?owner, "UI navigation: view is not ready");
             continue;
         }
-        if matches!(request.movement, Movement::Activate) {
+        if matches!(movement, Movement::Activate) {
             // Resolve only the focused control, never scan other controls or
             // substitute an available control when focus has become stale.
             if let Some(target) = focus.get()
@@ -690,7 +683,7 @@ fn navigate(
         // Check availability lazily in navigation order; a warmed next/previous
         // request visits only skipped unavailable controls and its destination.
         let destination = (1..=count).find_map(|step| {
-            let index = match (current, &request.movement) {
+            let index = match (current, &movement) {
                 (Some(index), Movement::Previous) => (index + count - step) % count,
                 (Some(index), _) => (index + step) % count,
                 (None, Movement::Previous) => count - step,
@@ -707,9 +700,9 @@ fn navigate(
             focus.set(target, bevy::input_focus::FocusCause::Navigated);
             visible.0 = true;
             events.write_for_activity(
-                request.token,
+                token,
                 UiFocusChanged {
-                    entity: request.token.entity(),
+                    entity: token.entity(),
                     view: mount.id.clone(),
                 },
             );
@@ -1170,7 +1163,7 @@ mod tests {
                 data: default(),
             };
             assert_eq!(
-                <UiAction as StateTreeEvent>::event_data(&action).unwrap(),
+                <UiAction as StateTreeEvent>::event_data(&action),
                 Some(LuauValue::Record(BTreeMap::from([
                     ("view".into(), LuauValue::String("view".into())),
                     ("action".into(), LuauValue::String("choose".into())),
@@ -1185,6 +1178,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct Observed(f64);
 
+    #[derive(StateTreeInput)]
     struct Observe;
     impl inslag_state_tree::StateTreeBinding for Observe {
         type Value = f64;
@@ -1204,8 +1198,8 @@ mod tests {
         value: f64,
     }
 
-    fn observation_data(event: &Observation) -> Result<LuauValue, StateTreeEventDataError> {
-        Ok(LuauValue::Number(event.value))
+    fn observation_data(event: &Observation) -> LuauValue {
+        LuauValue::Number(event.value)
     }
 
     #[test]
@@ -1218,9 +1212,8 @@ mod tests {
         app.init_resource::<Observed>()
             .init_resource::<HoverMap>()
             .add_plugins((StateTreePlugin::new(Update), KuiStateTreePlugin))
-            .add_state_tree_global_binding(
+            .add_state_tree_global_binding::<Observe, _, _>(
                 "world.observe",
-                |_, _| Ok(Observe),
                 |value: Res<Observed>| value.0,
             )
             .add_observer(|event: On<KuiAction>, mut observed: ResMut<Observed>| {

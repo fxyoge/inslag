@@ -18,8 +18,8 @@ use bevy::{
 use bevy_flair::prelude::{AttributeList, ClassList, StyleSheet, Styled, TypeName};
 use inslag_kui::state_tree::KuiStateTreePlugin;
 use inslag_state_tree::{
-    EntityStateTreeEventWriter, LuauValue, StateTreeDefinition, StateTreeEventDataError,
-    StateTreeExt, StateTreeInstance, StateTreePlugin, StateTreeSet, scxml,
+    EntityStateTreeEventWriter, LuauValue, StateTreeDefinition, StateTreeExt, StateTreeInstance,
+    StateTreePlugin, StateTreeSet, scxml,
 };
 
 const HEADER: &str = r#"<view xmlns="urn:inslag-kui:1" xmlns:bind="urn:inslag-kui:binding:1" version="1" name="benchmark">"#;
@@ -139,8 +139,8 @@ struct BenchInput {
     operation: &'static str,
     view: usize,
 }
-fn input_data(event: &BenchInput) -> Result<LuauValue, StateTreeEventDataError> {
-    Ok(LuauValue::Record(
+fn input_data(event: &BenchInput) -> LuauValue {
+    LuauValue::Record(
         [
             (
                 "operation".into(),
@@ -149,10 +149,11 @@ fn input_data(event: &BenchInput) -> Result<LuauValue, StateTreeEventDataError> 
             ("view".into(), LuauValue::String(format!("v{}", event.view))),
         ]
         .into(),
-    ))
+    )
 }
-#[derive(Message)]
+#[derive(Message, inslag_state_tree::StateTreeInput)]
 struct ReadySeen {
+    #[state_tree(owner)]
     controller: Entity,
     view: String,
 }
@@ -279,12 +280,7 @@ impl Fixture {
         if config.backend == Backend::Scxml {
             app.add_plugins((StateTreePlugin::new(Update), KuiStateTreePlugin))
                 .add_state_tree_event::<BenchInput>()
-                .add_state_tree_effect::<ReadySeen, _>("bench.ready", |context, args| {
-                    Ok(ReadySeen {
-                        controller: context.entity(),
-                        view: args.take::<String>("view")?,
-                    })
-                })
+                .add_state_tree_effect::<ReadySeen>("bench.ready")
                 .init_resource::<ReadyLedger>()
                 .add_systems(Update, record_ready.in_set(StateTreeSet::HandleEffects));
         }

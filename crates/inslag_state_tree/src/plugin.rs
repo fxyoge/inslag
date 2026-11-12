@@ -1175,27 +1175,19 @@ mod tests {
         StateTreeActivityOutcomeWriter, StateTreeBuilder, StateTreeEvent, StateTreeTransition,
     };
 
+    #[derive(crate::StateTreeInput)]
     struct FindPath;
 
     impl StateTreeActivity for FindPath {
         type Output = i64;
         type Error = String;
 
-        fn output_data(
-            output: &Self::Output,
-        ) -> Result<Option<crate::LuauValue>, crate::StateTreeEventDataError> {
-            if *output == -1 {
-                return Err(crate::StateTreeEventDataError::new(
-                    "path projection failed",
-                ));
-            }
-            Ok(Some(crate::LuauValue::Integer(*output)))
+        fn output_data(output: &Self::Output) -> Option<crate::LuauValue> {
+            Some(crate::LuauValue::Integer(*output))
         }
 
-        fn error_data(
-            error: &Self::Error,
-        ) -> Result<Option<crate::LuauValue>, crate::StateTreeEventDataError> {
-            Ok(Some(crate::LuauValue::String(error.clone())))
+        fn error_data(error: &Self::Error) -> Option<crate::LuauValue> {
+            Some(crate::LuauValue::String(error.clone()))
         }
     }
 
@@ -1374,23 +1366,22 @@ mod tests {
     #[state_tree(name = "advance.all", broadcast)]
     struct AdvanceAll;
 
-    fn project_advance(
-        event: &Advance,
-    ) -> Result<crate::LuauValue, crate::StateTreeEventDataError> {
-        Ok(crate::LuauValue::Record(
+    fn project_advance(event: &Advance) -> crate::LuauValue {
+        crate::LuauValue::Record(
             [(
                 "steps".into(),
                 crate::LuauValue::Integer(event.steps.into()),
             )]
             .into(),
-        ))
+        )
     }
 
     #[derive(Resource, Default)]
     struct ChangedInstances(usize);
 
-    #[derive(Message)]
+    #[derive(Message, crate::StateTreeInput)]
     struct EffectPublished {
+        #[state_tree(owner)]
         entity: Entity,
         amount: i64,
     }
@@ -1588,7 +1579,7 @@ mod tests {
     }
 
     #[test]
-    fn activity_projection_errors_fault_only_the_target_instance() {
+    fn activity_outcomes_cannot_be_vetoed_by_projection() {
         let mut app = activity_app();
         let handle = app
             .world_mut()
@@ -1614,13 +1605,13 @@ mod tests {
                 .unwrap()
         );
         app.update();
-        assert!(matches!(
+        assert_eq!(
             app.world()
                 .get::<StateTreeInstance>(faulted)
                 .unwrap()
                 .status(),
-            InstanceStatus::Faulted(crate::RuntimeFault::ActivityDataProjection { .. })
-        ));
+            &InstanceStatus::Running
+        );
         assert_eq!(
             app.world()
                 .get::<StateTreeInstance>(running)
@@ -1896,7 +1887,7 @@ mod tests {
         };
 
         assert_eq!(
-            event.event_data().unwrap(),
+            event.event_data(),
             Some(crate::LuauValue::Record(
                 [("steps".into(), crate::LuauValue::Integer(9))].into(),
             ))
@@ -1967,15 +1958,8 @@ mod tests {
             .add_state_tree_event::<Reset>()
             .add_state_tree_event::<ResetAll>()
             .add_state_tree_event::<AdvanceAll>()
-            .add_state_tree_activity::<FindPath, _>("find_path", |_context, _arguments| {
-                Ok(FindPath)
-            })
-            .add_state_tree_effect::<EffectPublished, _>("publish", |context, arguments| {
-                Ok(EffectPublished {
-                    entity: context.entity(),
-                    amount: arguments.take("amount")?,
-                })
-            });
+            .add_state_tree_activity::<FindPath>("find_path")
+            .add_state_tree_effect::<EffectPublished>("publish");
     }
 
     #[test]

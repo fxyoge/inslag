@@ -6,61 +6,28 @@ use bevy_ecs::{
 };
 
 use crate::{
-    StateTreeActivity, StateTreeActivityArgs, StateTreeActivityContext, StateTreeActivityError,
-    StateTreeBinding, StateTreeEffectArgs, StateTreeEffectContext, StateTreeEffectError,
-    StateTreeEvent, protocol::RegistrationOrigin,
+    StateTreeActivity, StateTreeBinding, StateTreeEvent, StateTreeInput,
+    protocol::RegistrationOrigin,
 };
 
 pub trait StateTreeExt {
     fn flush_state_tree_registrations(&mut self) -> &mut Self;
-
     fn add_state_tree_event<E: StateTreeEvent>(&mut self) -> &mut Self;
-
-    fn add_state_tree_effect<M, F>(
+    fn add_state_tree_effect<M: Message + StateTreeInput>(
         &mut self,
         name: impl Into<Box<str>>,
-        constructor: F,
-    ) -> &mut Self
-    where
-        M: Message,
-        F: Fn(
-                StateTreeEffectContext<'_>,
-                &mut StateTreeEffectArgs,
-            ) -> Result<M, StateTreeEffectError>
-            + Send
-            + Sync
-            + 'static;
-
-    fn add_state_tree_activity<A, F>(
+    ) -> &mut Self;
+    fn add_state_tree_activity<A: StateTreeActivity + StateTreeInput>(
         &mut self,
         name: impl Into<Box<str>>,
-        constructor: F,
-    ) -> &mut Self
-    where
-        A: StateTreeActivity,
-        F: Fn(
-                StateTreeActivityContext<'_>,
-                &mut StateTreeActivityArgs,
-            ) -> Result<A, StateTreeActivityError>
-            + Send
-            + Sync
-            + 'static;
-
-    fn add_state_tree_global_binding<B, F, S, M>(
+    ) -> &mut Self;
+    fn add_state_tree_global_binding<B, S, M>(
         &mut self,
         name: impl Into<Box<str>>,
-        constructor: F,
         source: S,
     ) -> &mut Self
     where
-        B: StateTreeBinding,
-        F: Fn(
-                StateTreeActivityContext<'_>,
-                &mut StateTreeActivityArgs,
-            ) -> Result<B, StateTreeActivityError>
-            + Send
-            + Sync
-            + 'static,
+        B: StateTreeBinding + StateTreeInput,
         S: IntoSystem<(), B::Value, M> + 'static;
 }
 
@@ -75,77 +42,32 @@ impl StateTreeExt for World {
         self
     }
 
-    fn add_state_tree_effect<M, F>(
+    fn add_state_tree_effect<M: Message + StateTreeInput>(
         &mut self,
         name: impl Into<Box<str>>,
-        constructor: F,
-    ) -> &mut Self
-    where
-        M: Message,
-        F: Fn(
-                StateTreeEffectContext<'_>,
-                &mut StateTreeEffectArgs,
-            ) -> Result<M, StateTreeEffectError>
-            + Send
-            + Sync
-            + 'static,
-    {
-        crate::effect::register_effect::<M, F>(
-            self,
-            name.into(),
-            constructor,
-            RegistrationOrigin::Application,
-        );
+    ) -> &mut Self {
+        crate::effect::register_effect::<M>(self, name.into(), RegistrationOrigin::Application);
         self
     }
 
-    fn add_state_tree_activity<A, F>(
+    fn add_state_tree_activity<A: StateTreeActivity + StateTreeInput>(
         &mut self,
         name: impl Into<Box<str>>,
-        constructor: F,
-    ) -> &mut Self
-    where
-        A: StateTreeActivity,
-        F: Fn(
-                StateTreeActivityContext<'_>,
-                &mut StateTreeActivityArgs,
-            ) -> Result<A, StateTreeActivityError>
-            + Send
-            + Sync
-            + 'static,
-    {
-        crate::activity::register_activity::<A, F>(
-            self,
-            name.into(),
-            constructor,
-            RegistrationOrigin::Application,
-        );
+    ) -> &mut Self {
+        crate::activity::register_activity::<A>(self, name.into(), RegistrationOrigin::Application);
         self
     }
 
-    fn add_state_tree_global_binding<B, F, S, M>(
+    fn add_state_tree_global_binding<B, S, M>(
         &mut self,
         name: impl Into<Box<str>>,
-        constructor: F,
         source: S,
     ) -> &mut Self
     where
-        B: StateTreeBinding,
-        F: Fn(
-                StateTreeActivityContext<'_>,
-                &mut StateTreeActivityArgs,
-            ) -> Result<B, StateTreeActivityError>
-            + Send
-            + Sync
-            + 'static,
+        B: StateTreeBinding + StateTreeInput,
         S: IntoSystem<(), B::Value, M> + 'static,
     {
-        crate::binding::register_global_binding::<B, F, S, M>(
-            self,
-            name.into(),
-            constructor,
-            source,
-        );
+        crate::binding::register_global_binding::<B, S, M>(self, name.into(), source);
         self
     }
 }
@@ -161,65 +83,33 @@ impl StateTreeExt for App {
         self
     }
 
-    fn add_state_tree_effect<M, F>(
+    fn add_state_tree_effect<M: Message + StateTreeInput>(
         &mut self,
         name: impl Into<Box<str>>,
-        constructor: F,
-    ) -> &mut Self
-    where
-        M: Message,
-        F: Fn(
-                StateTreeEffectContext<'_>,
-                &mut StateTreeEffectArgs,
-            ) -> Result<M, StateTreeEffectError>
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.world_mut()
-            .add_state_tree_effect::<M, F>(name, constructor);
+    ) -> &mut Self {
+        self.world_mut().add_state_tree_effect::<M>(name);
         self
     }
 
-    fn add_state_tree_activity<A, F>(
+    fn add_state_tree_activity<A: StateTreeActivity + StateTreeInput>(
         &mut self,
         name: impl Into<Box<str>>,
-        constructor: F,
-    ) -> &mut Self
-    where
-        A: StateTreeActivity,
-        F: Fn(
-                StateTreeActivityContext<'_>,
-                &mut StateTreeActivityArgs,
-            ) -> Result<A, StateTreeActivityError>
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.world_mut()
-            .add_state_tree_activity::<A, F>(name, constructor);
+    ) -> &mut Self {
+        self.world_mut().add_state_tree_activity::<A>(name);
         self
     }
 
-    fn add_state_tree_global_binding<B, F, S, M>(
+    fn add_state_tree_global_binding<B, S, M>(
         &mut self,
         name: impl Into<Box<str>>,
-        constructor: F,
         source: S,
     ) -> &mut Self
     where
-        B: StateTreeBinding,
-        F: Fn(
-                StateTreeActivityContext<'_>,
-                &mut StateTreeActivityArgs,
-            ) -> Result<B, StateTreeActivityError>
-            + Send
-            + Sync
-            + 'static,
+        B: StateTreeBinding + StateTreeInput,
         S: IntoSystem<(), B::Value, M> + 'static,
     {
         self.world_mut()
-            .add_state_tree_global_binding::<B, F, S, M>(name, constructor, source);
+            .add_state_tree_global_binding::<B, S, M>(name, source);
         self
     }
 }

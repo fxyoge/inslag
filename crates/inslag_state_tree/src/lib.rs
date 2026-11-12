@@ -118,6 +118,7 @@ mod binding;
 mod definition;
 mod effect;
 mod event;
+mod input;
 mod instance;
 mod luau;
 mod plugin;
@@ -146,11 +147,9 @@ pub use effect::{
     StateTreeArgs, StateTreeContext, StateTreeEffectArgs, StateTreeEffectContext,
     StateTreeEffectError,
 };
-pub use event::{
-    BroadcastStateTreeEvent, EntityStateTreeEvent, StateTreeEvent, StateTreeEventDataError,
-    StateTreeEventRef,
-};
-pub use inslag_state_tree_macros::StateTreeEvent;
+pub use event::{BroadcastStateTreeEvent, EntityStateTreeEvent, StateTreeEvent, StateTreeEventRef};
+pub use input::StateTreeInput;
+pub use inslag_state_tree_macros::{StateTreeEvent, StateTreeInput};
 pub use instance::{
     DatamodelOperation, InstanceStatus, PersistStateTree, RuntimeFault, StateTreeConfiguration,
     StateTreeDataOverrideError, StateTreeDataOverrides, StateTreeInstance,
@@ -182,10 +181,10 @@ pub mod prelude {
         StateTreeBinding, StateTreeBindingSet, StateTreeBuilder, StateTreeConfiguration,
         StateTreeContext, StateTreeData, StateTreeDataOverrideError, StateTreeDataOverrides,
         StateTreeDefinition, StateTreeEffectArgs, StateTreeEffectArgument, StateTreeEffectContext,
-        StateTreeEffectError, StateTreeEvent, StateTreeEventDataError, StateTreeEventLog,
-        StateTreeEventRef, StateTreeExt, StateTreeInstance, StateTreeLinkError,
-        StateTreeLinkFailure, StateTreeLinkIssue, StateTreePlugin, StateTreeProtocolInventory,
-        StateTreeSet, StateTreeSettings, StateTreeTarget, StateTreeTraceLog, StateTreeTracePlugin,
+        StateTreeEffectError, StateTreeEvent, StateTreeEventLog, StateTreeEventRef, StateTreeExt,
+        StateTreeInput, StateTreeInstance, StateTreeLinkError, StateTreeLinkFailure,
+        StateTreeLinkIssue, StateTreePlugin, StateTreeProtocolInventory, StateTreeSet,
+        StateTreeSettings, StateTreeTarget, StateTreeTraceLog, StateTreeTracePlugin,
         StateTreeTransition,
     };
 }

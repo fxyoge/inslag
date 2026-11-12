@@ -171,8 +171,9 @@ impl Plugin for WorkbenchPlugin {
     }
 }
 
-#[derive(Message, Clone)]
+#[derive(Message, Clone, inslag_state_tree::StateTreeInput)]
 struct ToolAction {
+    #[state_tree(owner)]
     view: Entity,
     action: String,
     value: Option<String>,

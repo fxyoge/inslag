@@ -20,6 +20,7 @@ const NAME: &str = "ist.spawn";
 #[derive(bevy_ecs::prelude::Component)]
 pub(crate) struct SpawnedStateTree;
 
+#[derive(crate::StateTreeInput)]
 struct SpawnActivity {
     definition: String,
 }
@@ -28,10 +29,8 @@ impl StateTreeActivity for SpawnActivity {
     type Output = ();
     type Error = String;
 
-    fn error_data(
-        error: &Self::Error,
-    ) -> Result<Option<LuauValue>, crate::StateTreeEventDataError> {
-        Ok(Some(LuauValue::String(error.clone())))
+    fn error_data(error: &Self::Error) -> Option<LuauValue> {
+        Some(LuauValue::String(error.clone()))
     }
 }
 
@@ -52,31 +51,9 @@ struct SpawnRuns {
 }
 
 pub(crate) fn register(app: &mut App, schedule: InternedScheduleLabel) {
-    crate::activity::register_activity::<SpawnActivity, _>(
+    crate::activity::register_activity::<SpawnActivity>(
         app.world_mut(),
         NAME.into(),
-        |_context, arguments| {
-            let definition: String = arguments.take("definition")?;
-            let path = AssetPath::try_parse(&definition).map_err(|error| {
-                crate::StateTreeActivityError::argument(
-                    "definition",
-                    format!("invalid state-tree definition asset path: {error}"),
-                )
-            })?;
-            if path.path().as_os_str().is_empty() {
-                return Err(crate::StateTreeActivityError::argument(
-                    "definition",
-                    "state-tree definition asset path cannot be empty",
-                ));
-            }
-            if path.path().extension().and_then(|value| value.to_str()) != Some("scxml") {
-                return Err(crate::StateTreeActivityError::argument(
-                    "definition",
-                    "state-tree definition asset path must end in .scxml",
-                ));
-            }
-            Ok(SpawnActivity { definition })
-        },
         crate::protocol::RegistrationOrigin::BuiltIn,
     );
     app.init_resource::<SpawnRuns>().add_systems(
@@ -92,11 +69,28 @@ fn handle_lifecycle(
     asset_server: Res<AssetServer>,
     mut runs: ResMut<SpawnRuns>,
     mut commands: Commands,
+    mut outcomes: crate::StateTreeActivityOutcomeWriter<SpawnActivity>,
 ) {
     for message in lifecycle.read() {
         match message {
             StateTreeActivityLifecycle::Started { token, activity } => {
-                let handle = asset_server.load::<StateTreeDefinition>(&activity.definition);
+                let path = match AssetPath::try_parse(&activity.definition) {
+                    Ok(path) => path.into_owned(),
+                    Err(error) => {
+                        outcomes.fail(*token, error.to_string());
+                        continue;
+                    }
+                };
+                if path.path().as_os_str().is_empty()
+                    || path.path().extension().and_then(|value| value.to_str()) != Some("scxml")
+                {
+                    outcomes.fail(
+                        *token,
+                        "state-tree loader requires a .scxml asset path".into(),
+                    );
+                    continue;
+                }
+                let handle = asset_server.load::<StateTreeDefinition>(path);
                 runs.runs.push(SpawnRun {
                     token: *token,
                     definition: activity.definition.clone(),
@@ -449,24 +443,27 @@ mod tests {
     }
 
     #[test]
-    fn invalid_definition_paths_fault_the_parent_activity() {
+    fn unusable_definition_paths_report_normal_activity_failures() {
         for path in ["", "://child.scxml", "child.txt"] {
             let mut app = app();
             let parent = spawn_parent(&mut app, path, None);
 
-            app.update();
-
-            assert!(matches!(
-                app.world()
+            for _ in 0..1_000 {
+                app.update();
+                if app
+                    .world()
                     .get::<StateTreeInstance>(parent)
                     .unwrap()
-                    .status(),
-                InstanceStatus::Faulted(crate::RuntimeFault::Activity {
-                    activity,
-                    argument: Some(argument),
-                    ..
-                }) if activity.as_ref() == NAME && argument.as_ref() == "definition"
-            ));
+                    .status()
+                    == &InstanceStatus::Complete
+                {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let tree = app.world().get::<StateTreeInstance>(parent).unwrap();
+            assert_eq!(tree.status(), &InstanceStatus::Complete);
+            assert_eq!(tree.active_state_names().last(), Some("failed"));
             assert!(app.world().resource::<SpawnRuns>().runs.is_empty());
         }
     }
@@ -697,10 +694,6 @@ mod tests {
             AssetPlugin::default(),
             crate::StateTreePlugin::new(Update),
         ));
-        app.add_state_tree_activity::<SpawnActivity, _>(NAME, |_context, arguments| {
-            Ok(SpawnActivity {
-                definition: arguments.take("definition")?,
-            })
-        });
+        app.add_state_tree_activity::<SpawnActivity>(NAME);
     }
 }

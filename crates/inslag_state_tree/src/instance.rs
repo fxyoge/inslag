@@ -262,18 +262,11 @@ pub enum RuntimeFault {
         span_start: usize,
         message: Box<str>,
     },
-    /// A typed external event could not be projected into Luau data.
-    EventDataProjection { event: Box<str>, message: Box<str> },
     /// A typed activity request could not be constructed or started.
     Activity {
         activity: Box<str>,
         argument: Option<Box<str>>,
         span_start: usize,
-        message: Box<str>,
-    },
-    /// A terminal activity value could not be projected into Luau.
-    ActivityDataProjection {
-        activity: Box<str>,
         message: Box<str>,
     },
     /// An instance supplied an initial value for data absent from its definition.
@@ -1157,22 +1150,7 @@ impl Execution<'_> {
             success,
             generation: outcome.token.generation,
         });
-        let data = match outcome.data {
-            Ok(data) => data,
-            Err(error) => {
-                self.set_fault(
-                    RuntimeFault::ActivityDataProjection {
-                        activity: definition.id.clone(),
-                        message: error.to_string().into(),
-                    },
-                    entity,
-                    activities,
-                    trace,
-                );
-                self.finish_current_macrostep(trace);
-                return true;
-            }
-        };
+        let data = outcome.data;
         let context = ActionContext {
             event_name: compiled.event_name(event),
             external_event: None,
@@ -2012,6 +1990,7 @@ impl Execution<'_> {
                 data_names,
                 data,
                 activity_id: Some(&definition.id),
+                effect_name: None,
                 activities: Some((
                     self.linked.expect("running instance is linked"),
                     self.activities.as_deref().unwrap_or(&[]),
@@ -2202,14 +2181,7 @@ impl Execution<'_> {
             .expect("compiled Luau expressions require a datamodel");
         let expression = &datamodel.expressions[expression.index()];
         let projected_event_data = if expression.reads_event_data && explicit_event_data.is_none() {
-            external_event
-                .map(StateTreeEventRef::event_data)
-                .transpose()
-                .map_err(|error| RuntimeFault::EventDataProjection {
-                    event: event_name.unwrap_or_default().into(),
-                    message: error.to_string().into(),
-                })?
-                .flatten()
+            external_event.and_then(StateTreeEventRef::event_data)
         } else {
             None
         };
@@ -2302,6 +2274,7 @@ impl Execution<'_> {
                         data_names,
                         data,
                         activity_id: None,
+                        effect_name: Some(name),
                         activities: Some((
                             self.linked.expect("running instance is linked"),
                             self.activities.as_deref().unwrap_or(&[]),

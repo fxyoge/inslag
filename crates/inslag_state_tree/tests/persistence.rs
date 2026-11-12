@@ -23,7 +23,8 @@ fn lifecycle(
         }
     }
 }
-struct Work(i64);
+#[derive(inslag_state_tree::StateTreeInput)]
+struct Work(#[state_tree(rename = "setting")] i64);
 impl StateTreeActivity for Work {
     type Output = ();
     type Error = ();
@@ -124,7 +125,7 @@ fn data(app: &App, entity: Entity, name: &str) -> Option<LuauValue> {
 fn configure(config: &mut App) {
     config
         .add_state_tree_event::<Advance>()
-        .add_state_tree_activity("work", |_, args| Ok(Work(args.take("setting")?)));
+        .add_state_tree_activity::<Work>("work");
 }
 fn configuration(extra: i64) -> StateTreeConfiguration {
     StateTreeConfiguration::new([("extra".into(), LuauValue::Integer(extra))])

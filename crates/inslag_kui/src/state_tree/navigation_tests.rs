@@ -13,8 +13,8 @@ struct Input {
     command: String,
 }
 
-fn input_data(event: &Input) -> Result<LuauValue, StateTreeEventDataError> {
-    Ok(LuauValue::String(event.command.clone()))
+fn input_data(event: &Input) -> LuauValue {
+    LuauValue::String(event.command.clone())
 }
 
 const CHART: &str = r#"<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:bst="urn:inslag-state-tree" datamodel="luau" initial="active">

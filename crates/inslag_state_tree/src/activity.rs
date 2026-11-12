@@ -17,9 +17,8 @@ use bevy_ecs::{
 };
 
 use crate::{
-    LuauValue, StateTreeActivityArgs, StateTreeActivityContext, StateTreeActivityError,
-    StateTreeEffectContext, StateTreeEffectError, StateTreeEventDataError, StateTreeInstance,
-    definition::ActivityId, protocol::RegistrationOrigin,
+    LuauValue, StateTreeActivityArgs, StateTreeEffectContext, StateTreeEffectError, StateTreeInput,
+    StateTreeInstance, definition::ActivityId, protocol::RegistrationOrigin,
 };
 
 /// A typed long-running request owned by one active state.
@@ -27,12 +26,12 @@ pub trait StateTreeActivity: Send + Sync + 'static {
     type Output: Send + Sync + 'static;
     type Error: Send + Sync + 'static;
 
-    fn output_data(_output: &Self::Output) -> Result<Option<LuauValue>, StateTreeEventDataError> {
-        Ok(None)
+    fn output_data(_output: &Self::Output) -> Option<LuauValue> {
+        None
     }
 
-    fn error_data(_error: &Self::Error) -> Result<Option<LuauValue>, StateTreeEventDataError> {
-        Ok(None)
+    fn error_data(_error: &Self::Error) -> Option<LuauValue> {
+        None
     }
 }
 
@@ -190,21 +189,13 @@ impl ErasedActivityToken {
     }
 }
 
-struct TypedActivity<A, F> {
-    constructor: F,
+struct TypedActivity<A> {
     marker: PhantomData<fn() -> A>,
 }
 
-impl<A, F> RegisteredActivity for TypedActivity<A, F>
+impl<A> RegisteredActivity for TypedActivity<A>
 where
-    A: StateTreeActivity,
-    F: Fn(
-            StateTreeActivityContext<'_>,
-            &mut StateTreeActivityArgs,
-        ) -> Result<A, StateTreeActivityError>
-        + Send
-        + Sync
-        + 'static,
+    A: StateTreeActivity + StateTreeInput,
 {
     fn payload_type_id(&self) -> std::any::TypeId {
         std::any::TypeId::of::<A>()
@@ -241,7 +232,7 @@ where
         token: ErasedActivityToken,
         commands: &ParallelCommands<'_, '_>,
     ) -> Result<(), StateTreeEffectError> {
-        let activity = (self.constructor)(context, &mut arguments)?;
+        let activity = A::from_state_tree_input(&context, &mut arguments)?;
         arguments.finish()?;
         commands.command_scope(move |mut commands| {
             commands.write_message(StateTreeActivityLifecycle::<A>::Started {
@@ -292,7 +283,7 @@ pub(crate) enum ActivityOutcomeKind {
 pub(crate) struct ActivityOutcome {
     pub token: ErasedActivityToken,
     pub kind: ActivityOutcomeKind,
-    pub data: Result<Option<LuauValue>, StateTreeEventDataError>,
+    pub data: Option<LuauValue>,
 }
 
 #[derive(Component)]
@@ -355,7 +346,7 @@ impl<A: StateTreeActivity> StateTreeActivityOutcomeWriter<'_, '_, A> {
         project: F,
     ) -> bool
     where
-        F: FnOnce() -> Result<Option<LuauValue>, StateTreeEventDataError>,
+        F: FnOnce() -> Option<LuauValue>,
     {
         let Ok((instance, inbox)) = self.instances.get(token.entity) else {
             return false;
@@ -392,20 +383,12 @@ impl<A: StateTreeActivity> StateTreeActivityOutcomeWriter<'_, '_, A> {
     }
 }
 
-pub(crate) fn register_activity<A, F>(
+pub(crate) fn register_activity<A>(
     world: &mut bevy_ecs::world::World,
     name: Box<str>,
-    constructor: F,
     origin: RegistrationOrigin,
 ) where
-    A: StateTreeActivity,
-    F: Fn(
-            StateTreeActivityContext<'_>,
-            &mut StateTreeActivityArgs,
-        ) -> Result<A, StateTreeActivityError>
-        + Send
-        + Sync
-        + 'static,
+    A: StateTreeActivity + StateTreeInput,
 {
     assert!(
         !name.is_empty(),
@@ -421,8 +404,7 @@ pub(crate) fn register_activity<A, F>(
         .activities
         .insert(
             name.clone(),
-            Arc::new(TypedActivity::<A, F> {
-                constructor,
+            Arc::new(TypedActivity::<A> {
                 marker: PhantomData,
             }),
         );
@@ -435,6 +417,7 @@ pub(crate) fn register_activity<A, F>(
 mod tests {
     use super::*;
 
+    #[derive(crate::StateTreeInput)]
     struct TestActivity;
 
     impl StateTreeActivity for TestActivity {
@@ -445,10 +428,9 @@ mod tests {
     #[test]
     fn spawn_name_can_be_registered_when_no_activity_owns_it() {
         let mut world = bevy_ecs::world::World::new();
-        register_activity::<TestActivity, _>(
+        register_activity::<TestActivity>(
             &mut world,
             "ist.spawn".into(),
-            |_context, _arguments| Ok(TestActivity),
             RegistrationOrigin::Application,
         );
         assert!(
@@ -463,16 +445,14 @@ mod tests {
     #[should_panic(expected = "state-tree activity `duplicate` was registered more than once")]
     fn activity_names_must_be_unique() {
         let mut world = bevy_ecs::world::World::new();
-        register_activity::<TestActivity, _>(
+        register_activity::<TestActivity>(
             &mut world,
             "duplicate".into(),
-            |_context, _arguments| Ok(TestActivity),
             RegistrationOrigin::Application,
         );
-        register_activity::<TestActivity, _>(
+        register_activity::<TestActivity>(
             &mut world,
             "duplicate".into(),
-            |_context, _arguments| Ok(TestActivity),
             RegistrationOrigin::Application,
         );
     }
