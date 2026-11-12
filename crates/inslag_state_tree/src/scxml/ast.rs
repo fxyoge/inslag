@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 /// A complete parsed SCXML document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Document {
@@ -221,7 +219,7 @@ pub struct Transition {
     pub span: Span,
     pub event: Option<String>,
     pub events: Vec<String>,
-    pub after: Option<Duration>,
+    pub after: Option<String>,
     pub condition: Option<String>,
     pub targets: Vec<String>,
     pub transition_type: Option<TransitionType>,

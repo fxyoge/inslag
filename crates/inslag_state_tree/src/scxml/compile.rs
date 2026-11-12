@@ -738,8 +738,8 @@ impl<'a> Compiler<'a> {
             .first()
             .map(|target| self.target(target, transition.span))
             .transpose()?;
-        let mut specification = if let Some(after) = transition.after {
-            StateTreeTransition::after(after)
+        let mut specification = if let Some(after) = &transition.after {
+            StateTreeTransition::after_expression(after.as_str())
         } else if transition.events.is_empty() {
             StateTreeTransition::eventless()
         } else {
@@ -1153,6 +1153,14 @@ fn builder_error(source_name: &str, error: BuildError) -> CompileError {
             span_start,
             message: message.into(),
         },
+        BuildError::InvalidTimerDuration {
+            span_start,
+            message,
+        } => CompileError::InvalidDocument {
+            source_name: source_name.to_owned(),
+            span_start,
+            message: message.into(),
+        },
         BuildError::UnknownDataName { name, span_start } => CompileError::InvalidDataModel {
             source_name: source_name.to_owned(),
             span_start,
@@ -1557,7 +1565,7 @@ mod tests {
                 "triggered history transitions",
             ),
             (
-                r#"<state id="owner"><state id="child"/><history><transition ist:after="1s" target="child"/></history></state>"#,
+                r#"<state id="owner"><state id="child"/><history><transition ist:after="1" target="child"/></history></state>"#,
                 "triggered history transitions",
             ),
             (
@@ -1661,7 +1669,7 @@ mod tests {
     #[test]
     fn rejects_event_and_after_on_the_same_transition() {
         let source = format!(
-            r#"<scxml xmlns="{NS}" xmlns:ist="{}"><state><transition event="go" ist:after="1s"/></state></scxml>"#,
+            r#"<scxml xmlns="{NS}" xmlns:ist="{}"><state><transition event="go" ist:after="1"/></state></scxml>"#,
             super::super::INSLAG_STATE_TREE_NAMESPACE,
         );
         let document = scxml::parse("event-after.scxml", &source).unwrap();
@@ -1677,7 +1685,7 @@ mod tests {
     #[test]
     fn after_does_not_allow_other_foreign_transition_attributes() {
         let source = format!(
-            r#"<scxml xmlns="{NS}" xmlns:ist="{}" xmlns:x="urn:other"><state><transition ist:after="1s" x:after="2s"/></state></scxml>"#,
+            r#"<scxml xmlns="{NS}" xmlns:ist="{}" xmlns:x="urn:other"><state><transition ist:after="1" x:after="2s"/></state></scxml>"#,
             super::super::INSLAG_STATE_TREE_NAMESPACE,
         );
         let document = scxml::parse("foreign-after.scxml", &source).unwrap();
@@ -1694,7 +1702,7 @@ mod tests {
     #[test]
     fn unqualified_after_is_not_the_bevy_extension() {
         let source = format!(
-            r#"<scxml xmlns="{NS}" xmlns:ist="urn:inslag-state-tree"><state><transition after="1s" target="done"/></state><final id="done"/></scxml>"#,
+            r#"<scxml xmlns="{NS}" xmlns:ist="urn:inslag-state-tree"><state><transition after="1" target="done"/></state><final id="done"/></scxml>"#,
         );
         let document = scxml::parse("unqualified-after.scxml", &source).unwrap();
 

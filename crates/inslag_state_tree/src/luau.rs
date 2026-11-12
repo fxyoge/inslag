@@ -1,7 +1,7 @@
 //! State-tree policy around the shared expression engine: assignment locations,
 //! lazy event projection metadata, boolean guards, and authored source spans.
 use full_moon::{
-    ast::{Expression, FunctionCall, Index, Prefix, Stmt, Suffix, Var, VarExpression},
+    ast::{Expression, FunctionCall, Index, LastStmt, Prefix, Stmt, Suffix, Var, VarExpression},
     tokenizer::{TokenReference, TokenType},
     visitors::Visitor,
 };
@@ -18,6 +18,7 @@ pub(crate) struct CompiledLuauExpression {
     pub boolean: bool,
     pub span_start: usize,
     pub reads_event_data: bool,
+    pub constant: bool,
 }
 
 impl Deref for CompiledLuauExpression {
@@ -44,6 +45,10 @@ pub(crate) fn compile_expression(
         })?;
     let mut visitor = EventDataVisitor::default();
     visitor.visit_ast(&ast);
+    let constant = match ast.nodes().last_stmt() {
+        Some(LastStmt::Return(statement)) => statement.returns().iter().all(is_constant),
+        _ => false,
+    };
     Ok(CompiledLuauExpression {
         engine,
         #[cfg(test)]
@@ -52,7 +57,18 @@ pub(crate) fn compile_expression(
         boolean,
         span_start,
         reads_event_data: visitor.found,
+        constant,
     })
+}
+
+fn is_constant(expression: &Expression) -> bool {
+    match expression {
+        Expression::Number(_) | Expression::String(_) | Expression::Symbol(_) => true,
+        Expression::Parentheses { expression, .. }
+        | Expression::UnaryOperator { expression, .. } => is_constant(expression),
+        Expression::BinaryOperator { lhs, rhs, .. } => is_constant(lhs) && is_constant(rhs),
+        _ => false,
+    }
 }
 
 pub(crate) fn environment() -> &'static inslag_luau::EnvironmentSpec {

@@ -10,7 +10,7 @@ fn extension_prefixes_resolve_to_the_inslag_namespace() {
                 <state id="active">
                     <onentry><{prefix}:effect name="record"/></onentry>
                     <{prefix}:activity id="child" name="ist.spawn"/>
-                    <transition {prefix}:after="1s" target="done"/>
+                    <transition {prefix}:after="1" target="done"/>
                 </state>
                 <final id="done"/>
             </scxml>"#

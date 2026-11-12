@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeSet, HashMap},
-    time::Duration,
-};
+use std::collections::{BTreeSet, HashMap};
 
 use quick_xml::events::{BytesRef, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
@@ -1034,8 +1031,7 @@ fn decode_transition(
     };
     let event = attribute(element, "event").map(str::to_owned);
     let after = namespaced_attribute(element, super::INSLAG_STATE_TREE_NAMESPACE, "after")
-        .map(|value| parse_duration(value, element.span, source_name, source))
-        .transpose()?;
+        .map(str::to_owned);
     Ok(Transition {
         span: element.span,
         events: event
@@ -1052,79 +1048,6 @@ fn decode_transition(
         attributes: element.attributes.clone(),
         content: decode_executable_children(element, source_name, source)?,
     })
-}
-
-fn parse_duration(
-    value: &str,
-    span: Span,
-    source_name: &str,
-    source: &str,
-) -> Result<Duration, Diagnostic> {
-    let (number, unit_nanos, fractional_digits) = value
-        .strip_suffix("ms")
-        .map(|number| (number, 1_000_000_u128, 6))
-        .or_else(|| {
-            value
-                .strip_suffix('s')
-                .map(|number| (number, 1_000_000_000_u128, 9))
-        })
-        .ok_or_else(|| invalid_after_duration(source_name, source, span))?;
-    let mut parts = number.split('.');
-    let integer = parts.next().unwrap_or_default();
-    let fraction = parts.next();
-    let valid_number = !integer.is_empty()
-        && integer.bytes().all(|byte| byte.is_ascii_digit())
-        && fraction.is_none_or(|fraction| {
-            !fraction.is_empty() && fraction.bytes().all(|byte| byte.is_ascii_digit())
-        })
-        && parts.next().is_none();
-    if !valid_number {
-        return Err(invalid_after_duration(source_name, source, span));
-    }
-    let whole_nanos = integer
-        .parse::<u128>()
-        .ok()
-        .and_then(|integer| integer.checked_mul(unit_nanos))
-        .ok_or_else(|| invalid_after_duration(source_name, source, span))?;
-    let fraction_nanos = match fraction {
-        Some(fraction) => decimal_fraction_nanos(fraction, fractional_digits)
-            .ok_or_else(|| invalid_after_duration(source_name, source, span))?,
-        None => 0,
-    };
-    let total_nanos = whole_nanos
-        .checked_add(fraction_nanos)
-        .filter(|total| *total <= u128::from(u64::MAX) * 1_000_000_000 + 999_999_999)
-        .ok_or_else(|| invalid_after_duration(source_name, source, span))?;
-    let duration = Duration::new(
-        (total_nanos / 1_000_000_000) as u64,
-        (total_nanos % 1_000_000_000) as u32,
-    );
-    if duration.is_zero() {
-        return Err(invalid_after_duration(source_name, source, span));
-    }
-    Ok(duration)
-}
-
-fn invalid_after_duration(source_name: &str, source: &str, span: Span) -> Diagnostic {
-    error_at(
-        source_name,
-        source,
-        span.start,
-        "ist:after must be a positive duration literal ending in `ms` or `s`",
-    )
-}
-
-fn decimal_fraction_nanos(fraction: &str, precision: usize) -> Option<u128> {
-    let mut nanos = 0_u128;
-    for (index, byte) in fraction.bytes().enumerate() {
-        let digit = u128::from(byte - b'0');
-        if index < precision {
-            nanos += digit * 10_u128.pow((precision - index - 1) as u32);
-        } else if digit != 0 {
-            return None;
-        }
-    }
-    Some(nanos)
 }
 
 fn decode_content(element: &Element) -> Content {
@@ -1440,9 +1363,9 @@ mod tests {
     }
 
     #[test]
-    fn parses_namespaced_after_durations_without_classifying_them_as_eventless() {
+    fn preserves_namespaced_after_expressions_without_classifying_them_as_eventless() {
         let source = format!(
-            r#"<scxml xmlns="{NS}" xmlns:timer="{}"><state><transition timer:after="1.5s" target="done"/></state><final id="done"/></scxml>"#,
+            r#"<scxml xmlns="{NS}" xmlns:timer="{}"><state><transition timer:after="remaining * 1.5" target="done"/></state><final id="done"/></scxml>"#,
             super::super::INSLAG_STATE_TREE_NAMESPACE,
         );
         let document = parse("after.scxml", &source).expect("valid after transition");
@@ -1455,7 +1378,7 @@ mod tests {
             _ => panic!("transition"),
         };
 
-        assert_eq!(transition.after, Some(Duration::from_millis(1_500)));
+        assert_eq!(transition.after.as_deref(), Some("remaining * 1.5"));
         assert!(
             document
                 .capabilities()
@@ -1469,44 +1392,14 @@ mod tests {
     }
 
     #[test]
-    fn rejects_malformed_after_duration_literals() {
+    fn leaves_after_expression_validation_to_the_compiler() {
         let namespace = super::super::INSLAG_STATE_TREE_NAMESPACE;
-        for value in [
-            "0s",
-            "0.0ms",
-            "-1s",
-            ".5s",
-            "1.s",
-            "1e3s",
-            "NaNs",
-            "infs",
-            "1 s",
-            " 1s",
-            "1m",
-            "0.0000000001s",
-            "18446744073709551616s",
-        ] {
+        for value in ["", "0", "-1", "1s", "250ms", "remaining +"] {
             let source = format!(
                 r#"<scxml xmlns="{NS}" xmlns:ist="{namespace}"><state><transition ist:after="{value}" target="done"/></state><final id="done"/></scxml>"#,
             );
-            let error = parse("invalid-after.scxml", &source).unwrap_err();
-            assert!(
-                error
-                    .message
-                    .contains("ist:after must be a positive duration literal"),
-                "unexpected diagnostic for {value:?}: {error}"
-            );
+            parse("after.scxml", &source).expect("expressions are unparsed in the AST");
         }
-    }
-
-    #[test]
-    fn accepts_the_largest_representable_after_duration() {
-        let source = format!(
-            r#"<scxml xmlns="{NS}" xmlns:ist="{}"><state><transition ist:after="18446744073709551615.999999999s" target="done"/></state><final id="done"/></scxml>"#,
-            super::super::INSLAG_STATE_TREE_NAMESPACE,
-        );
-
-        parse("maximum-after.scxml", &source).expect("representable duration");
     }
 
     #[test]

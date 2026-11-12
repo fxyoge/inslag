@@ -75,7 +75,7 @@ fn definition(updated: bool) -> StateTreeDefinition {
         <onentry><assign location="entries" expr="entries + 1"/></onentry>
         <ist:activity id="job" name="work"><ist:arg name="setting" expr="counter + config.extra"/></ist:activity>
         <transition event="advance" target="other"><assign location="counter" expr="counter + 1"/></transition>
-        <transition ist:after="10s" target="done"/>
+        <transition ist:after="10" target="done"/>
       </state>
       <state id="other"><transition event="advance" target="{state}"/></state>
       <final id="done"/>
@@ -180,6 +180,57 @@ fn checkpoint_only_restores_datamodel_then_enters_current_initial_configuration(
             .active_state_names()
             .last(),
         Some("replacement")
+    );
+}
+
+#[test]
+fn restored_dynamic_timers_evaluate_current_entry_data_and_configuration() {
+    let mut app = app();
+    let definition = xml(r#"
+        <datamodel><data id="entries" expr="0"/></datamodel>
+        <state id="waiting">
+            <onentry><assign location="entries" expr="entries + 1"/></onentry>
+            <transition ist:after="entries * config.extra" target="done"/>
+        </state>
+        <final id="done"/>
+        "#);
+    spawn(&mut app, definition);
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(Duration::from_secs(1));
+    app.world_mut().run_schedule(Update);
+    let checkpoint = Checkpoint::capture(app.world_mut()).unwrap();
+    checkpoint.restore(app.world_mut()).unwrap();
+    let entity = app
+        .world_mut()
+        .query_filtered::<Entity, With<StateTreeInstance>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut().entity_mut(entity).insert(configuration(3));
+    app.world_mut().run_schedule(Update);
+    app.world_mut().run_schedule(Update);
+    assert_eq!(data(&app, entity, "entries"), Some(LuauValue::Integer(2)));
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(Duration::from_millis(5999));
+    app.world_mut().run_schedule(Update);
+    assert_eq!(
+        app.world()
+            .get::<StateTreeInstance>(entity)
+            .unwrap()
+            .status(),
+        &InstanceStatus::Running
+    );
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(Duration::from_millis(1));
+    app.world_mut().run_schedule(Update);
+    assert_eq!(
+        app.world()
+            .get::<StateTreeInstance>(entity)
+            .unwrap()
+            .status(),
+        &InstanceStatus::Complete
     );
 }
 
@@ -531,7 +582,7 @@ fn unmarked_instances_preserve_pending_events_outcomes_and_timer_deadlines() {
         <ist:activity id="job" name="work"><ist:arg name="setting" expr="1"/></ist:activity>
         <transition event="advance"><assign location="counter" expr="counter + 1"/></transition>
         <transition event="done.activity.job"><assign location="completed" expr="true"/></transition>
-        <transition ist:after="10s" target="done"/>
+        <transition ist:after="10" target="done"/>
       </state><final id="done"/>"#);
     let handle = app
         .world_mut()

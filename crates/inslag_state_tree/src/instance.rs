@@ -17,7 +17,8 @@ use crate::activity::{
 };
 use crate::definition::{
     Action, ActivityId, CompiledDefinition, Entry, EventId, EventSet, ExpressionId, HistoryIndex,
-    LinkedDefinition, StateId, StateKind, StateTreeTarget, TimerId, Transition, TransitionTrigger,
+    LinkedDefinition, StateId, StateKind, StateTreeTarget, TimerDuration, TimerId, Transition,
+    TransitionTrigger, timer_duration,
 };
 use crate::effect::{RuntimeEffectSink, StateTreeEffectArgs, StateTreeEffectContext};
 use crate::{
@@ -281,6 +282,7 @@ pub enum DatamodelOperation {
     Assign,
     EffectArgument,
     ActivityArgument,
+    TimerDuration,
 }
 
 #[derive(Component, Clone, Copy, Debug, Default)]
@@ -1632,8 +1634,7 @@ impl Execution<'_> {
         runtime
             .entries
             .sort_unstable_by_key(|entry| compiled.state(entry.state).document_order);
-        for index in 0..runtime.entries.len() {
-            let entry = runtime.entries[index];
+        for &entry in &runtime.entries {
             if let Err(fault) =
                 self.enter_state(compiled, entry, context, effects, activities, trace)
             {
@@ -1839,8 +1840,8 @@ impl Execution<'_> {
         }
         let state = compiled.state(entry.state);
         trace.record(StateTreeTraceRecord::StateEntered { state: &state.name });
-        self.arm_state_timers(compiled, entry.state);
         self.execute_actions(compiled, &state.entry_actions, context, effects, trace)?;
+        self.arm_state_timers(compiled, entry.state, context)?;
         self.start_state_activities(compiled, entry.state, context, activities, trace)?;
         if entry.take_initial {
             self.execute_actions(compiled, &state.initial_actions, context, effects, trace)?;
@@ -1860,18 +1861,43 @@ impl Execution<'_> {
         Ok(())
     }
 
-    fn arm_state_timers(&mut self, compiled: &CompiledDefinition, state: StateId) {
+    fn arm_state_timers(
+        &mut self,
+        compiled: &CompiledDefinition,
+        state: StateId,
+        context: ActionContext<'_>,
+    ) -> Result<(), RuntimeFault> {
         for transition in &compiled.state(state).transitions {
             let TransitionTrigger::After(timer) = transition.trigger else {
                 continue;
             };
+            let definition = compiled.timers[timer.index()];
+            let fault = |message: &str| RuntimeFault::Datamodel {
+                operation: DatamodelOperation::TimerDuration,
+                span_start: definition.span_start,
+                message: message.into(),
+            };
+            let duration = match definition.duration {
+                TimerDuration::Fixed(duration) => duration,
+                TimerDuration::Expression(expression) => {
+                    let value = self.evaluate_expression(
+                        compiled,
+                        expression,
+                        context.event_name,
+                        context.external_event,
+                        context.event_data,
+                        DatamodelOperation::TimerDuration,
+                    )?;
+                    timer_duration(&value).map_err(fault)?
+                }
+            };
+            let deadline =
+                self.runtime.now.checked_add(duration).ok_or_else(|| {
+                    fault("ist:after deadline exceeds the simulation clock range")
+                })?;
             let slot = &mut self.runtime.timers[timer.index()];
             slot.generation = slot.generation.wrapping_add(1);
             slot.armed = true;
-            let Some(deadline) = self.runtime.now.checked_add(compiled.timers[timer.index()])
-            else {
-                continue;
-            };
             self.runtime.timer_updates.push(TimerUpdate::Arm {
                 token: TimerToken {
                     runtime_id: self.runtime.runtime_id,
@@ -1881,6 +1907,7 @@ impl Execution<'_> {
                 deadline,
             });
         }
+        Ok(())
     }
 
     fn timer_matches(&self, due: &[TimerToken], timer: TimerId) -> bool {
@@ -3978,7 +4005,7 @@ mod tests {
     }
 
     #[test]
-    fn timer_rearm_beyond_the_clock_range_does_not_refire_immediately() {
+    fn timer_rearm_beyond_the_clock_range_faults_instead_of_leaving_an_unarmed_wait() {
         let mut builder = StateTreeBuilder::new("maximum-deadline");
         let root = builder.compound_root("root").unwrap();
         let waiting = builder.atomic("waiting", root).unwrap();
@@ -3994,6 +4021,13 @@ mod tests {
         assert!(advance(&mut execution, Duration::MAX));
         assert!(!advance(&mut execution, Duration::ZERO));
         assert_eq!(execution.active_state_names().last(), Some("waiting"));
+        assert!(matches!(
+            execution.status(),
+            InstanceStatus::Faulted(RuntimeFault::Datamodel {
+                operation: DatamodelOperation::TimerDuration,
+                ..
+            })
+        ));
     }
 
     #[test]

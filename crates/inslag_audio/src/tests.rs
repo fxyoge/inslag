@@ -327,7 +327,7 @@ fn cancellation_during_loading_and_same_frame_start_cancel_never_play() {
         let transition = if immediate {
             r#"<transition target="done"/>"#
         } else {
-            r#"<transition ist:after="1s" target="done"/>"#
+            r#"<transition ist:after="1" target="done"/>"#
         };
         chart(
             &mut app,
@@ -594,7 +594,7 @@ fn reentry_replaces_generation_without_stopping_the_new_run() {
     let owner = chart(
         &mut app,
         &format!(
-            r#"<state id="active">{}<transition ist:after="1s" target="active"/></state>"#,
+            r#"<state id="active">{}<transition ist:after="1" target="active"/></state>"#,
             activity("loop.wav", r#"<ist:arg name="loop" expr="true"/>"#)
         ),
     );

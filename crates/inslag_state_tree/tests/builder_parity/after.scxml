@@ -3,7 +3,7 @@
        name="after-transitions"
        initial="waiting">
   <state id="waiting">
-    <transition ist:after="250ms" target="done"/>
+    <transition ist:after="0.25" target="done"/>
   </state>
   <final id="done"/>
 </scxml>

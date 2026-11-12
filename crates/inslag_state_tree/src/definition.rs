@@ -15,7 +15,7 @@ use thiserror::Error;
 use crate::activity::{RegisteredActivity, StateTreeActivityRegistry};
 use crate::effect::{RegisteredEffect, StateTreeEffectRegistry};
 use crate::event::StateTreeEventRegistry;
-use crate::luau::{CompiledLuauExpression, compile_expression};
+use crate::luau::{CompiledLuauExpression, LuauValue, compile_expression};
 
 /// A compact state identifier local to one [`StateTreeDefinition`].
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -312,6 +312,20 @@ pub(crate) enum TransitionTrigger {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "persistence", derive(serde::Serialize))]
+pub(crate) enum TimerDuration {
+    Fixed(Duration),
+    Expression(ExpressionId),
+}
+
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "persistence", derive(serde::Serialize))]
+pub(crate) struct TimerDefinition {
+    pub duration: TimerDuration,
+    pub span_start: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "persistence", derive(serde::Serialize))]
 pub(crate) struct Transition {
     pub trigger: TransitionTrigger,
     pub condition: Option<ExpressionId>,
@@ -359,7 +373,7 @@ pub(crate) struct CompiledDefinition {
     pub max_active: usize,
     pub has_parallel: bool,
     pub datamodel: Option<CompiledLuauDataModel>,
-    pub timers: Box<[Duration]>,
+    pub timers: Box<[TimerDefinition]>,
     events: Box<[EventPattern]>,
     event_requirements: Box<[EventRequirement]>,
     internal_events: Box<[EventId]>,
@@ -762,7 +776,7 @@ struct DraftHistory {
 enum DraftTransitionTrigger {
     Event(EventPattern),
     Eventless,
-    After(Duration, Option<Box<str>>),
+    After(TimerDefinition, Option<Box<str>>),
 }
 
 #[derive(Clone, Debug)]
@@ -999,6 +1013,7 @@ enum StateTreeTransitionTrigger {
     EventDescriptors(Vec<Box<str>>),
     Eventless,
     After(Duration),
+    AfterExpression(Box<str>),
 }
 
 /// A complete transition authored through [`StateTreeBuilder`].
@@ -1067,9 +1082,16 @@ impl StateTreeTransition {
         }
     }
 
+    pub fn after_expression(expression: impl Into<Box<str>>) -> Self {
+        Self {
+            trigger: StateTreeTransitionTrigger::AfterExpression(expression.into()),
+            ..Self::after(Duration::ZERO)
+        }
+    }
+
     /// Stable identity of an after transition, unique within its source state.
     /// Required when persisting a definition; independent of duration and target.
-    /// SCXML uses `ist:id="finish"` alongside `ist:after="1s"`.
+    /// SCXML uses `ist:id="finish"` alongside `ist:after="1"`.
     pub fn timer_id(mut self, name: impl Into<Box<str>>) -> Self {
         self.timer_name = Some(name.into());
         self
@@ -1414,10 +1436,15 @@ impl StateTreeBuilder {
             StateTreeTransitionTrigger::After(duration) if duration.is_zero() => {
                 return Err(BuildError::ZeroTimerDuration);
             }
-            StateTreeTransitionTrigger::After(_) => {}
+            StateTreeTransitionTrigger::After(_)
+            | StateTreeTransitionTrigger::AfterExpression(_) => {}
         }
         if let Some(name) = &transition.timer_name {
-            if !matches!(transition.trigger, StateTreeTransitionTrigger::After(_)) {
+            if !matches!(
+                transition.trigger,
+                StateTreeTransitionTrigger::After(_)
+                    | StateTreeTransitionTrigger::AfterExpression(_)
+            ) {
                 return Err(BuildError::TimerIdOnNonTimer);
             }
             if !is_activity_id(name) {
@@ -1430,19 +1457,28 @@ impl StateTreeBuilder {
             }
         }
         let expression_checkpoint = self.expression_count();
-        let condition = transition
-            .condition
-            .map(|condition| self.register_expression(condition, true))
-            .transpose();
-        let condition = match condition {
-            Ok(condition) => condition,
-            Err(error) => {
-                self.truncate_expressions(expression_checkpoint);
-                return Err(error);
-            }
-        };
-        let actions = match self.lower_actions(transition.actions) {
-            Ok(actions) => actions,
+        let lowered = (|| {
+            let duration = match &transition.trigger {
+                StateTreeTransitionTrigger::After(duration) => {
+                    Some(TimerDuration::Fixed(*duration))
+                }
+                StateTreeTransitionTrigger::AfterExpression(source) => {
+                    Some(self.lower_timer_duration(AuthoredExpression {
+                        source: source.clone(),
+                        span_start: transition.span_start,
+                    })?)
+                }
+                _ => None,
+            };
+            let condition = transition
+                .condition
+                .map(|condition| self.register_expression(condition, true))
+                .transpose()?;
+            let actions = self.lower_actions(transition.actions)?;
+            Ok((duration, condition, actions))
+        })();
+        let (duration, condition, actions) = match lowered {
+            Ok(lowered) => lowered,
             Err(error) => {
                 self.truncate_expressions(expression_checkpoint);
                 return Err(error);
@@ -1477,10 +1513,17 @@ impl StateTreeBuilder {
                     span_start,
                 )?;
             }
-            StateTreeTransitionTrigger::After(duration) => {
+            StateTreeTransitionTrigger::After(_)
+            | StateTreeTransitionTrigger::AfterExpression(_) => {
                 self.push_transition(
                     source,
-                    DraftTransitionTrigger::After(duration, transition.timer_name),
+                    DraftTransitionTrigger::After(
+                        TimerDefinition {
+                            duration: duration.expect("after transitions have a duration"),
+                            span_start: transition.span_start,
+                        },
+                        transition.timer_name,
+                    ),
                     condition,
                     transition
                         .target
@@ -1652,6 +1695,30 @@ impl StateTreeBuilder {
     ) -> Result<ExpressionId, BuildError> {
         let expression = compile_authored_expression(expression, boolean)?;
         self.luau_expression(expression)
+    }
+
+    fn lower_timer_duration(
+        &mut self,
+        expression: AuthoredExpression,
+    ) -> Result<TimerDuration, BuildError> {
+        let expression = compile_authored_expression(expression, false)?;
+        if expression.constant {
+            let value =
+                expression
+                    .evaluate_borrowed(&[])
+                    .map_err(|error| BuildError::InvalidLuau {
+                        span_start: expression.span_start,
+                        message: error.to_string().into(),
+                    })?;
+            let duration =
+                timer_duration(&value).map_err(|message| BuildError::InvalidTimerDuration {
+                    span_start: expression.span_start,
+                    message,
+                })?;
+            return Ok(TimerDuration::Fixed(duration));
+        }
+        self.luau_expression(expression)
+            .map(TimerDuration::Expression)
     }
 
     fn lower_actions(
@@ -1919,11 +1986,11 @@ impl StateTreeBuilder {
                         TransitionTrigger::Event(event)
                     }
                     DraftTransitionTrigger::Eventless => TransitionTrigger::Eventless,
-                    DraftTransitionTrigger::After(duration, _name) => {
+                    DraftTransitionTrigger::After(definition, _name) => {
                         let timer = TimerId(
                             u32::try_from(timers.len()).map_err(|_| BuildError::TooManyTimers)?,
                         );
-                        timers.push(*duration);
+                        timers.push(*definition);
                         TransitionTrigger::After(timer)
                     }
                 };
@@ -2760,6 +2827,21 @@ pub(crate) fn is_activity_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
+pub(crate) fn timer_duration(value: &LuauValue) -> Result<Duration, &'static str> {
+    let seconds = match value {
+        LuauValue::Number(seconds) => *seconds,
+        LuauValue::Integer(seconds) => *seconds as f64,
+        _ => return Err("ist:after must return a number of seconds"),
+    };
+    if !seconds.is_finite() || seconds <= 0. {
+        return Err("ist:after must return finite, positive seconds");
+    }
+    Duration::try_from_secs_f64(seconds)
+        .ok()
+        .filter(|duration| !duration.is_zero())
+        .ok_or("ist:after is outside the supported duration range")
+}
+
 /// A state-tree definition validation error.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum BuildError {
@@ -2857,6 +2939,11 @@ pub enum BuildError {
     EmptyTransition,
     #[error("an after transition requires a positive duration")]
     ZeroTimerDuration,
+    #[error("invalid after duration at byte {span_start}: {message}")]
+    InvalidTimerDuration {
+        span_start: usize,
+        message: &'static str,
+    },
     #[error("a timer id may only be assigned to an after transition")]
     TimerIdOnNonTimer,
     #[error("timer id `{0}` must be a non-empty ASCII event-name segment")]
@@ -2926,7 +3013,7 @@ struct DefinitionSemantics {
     max_active: usize,
     has_parallel: bool,
     datamodel: Option<DataModelSemantics>,
-    timers: Vec<Duration>,
+    timers: Vec<TimerDuration>,
     events: Vec<EventPattern>,
     event_requirements: Vec<EventId>,
     internal_events: Vec<EventId>,
@@ -3218,7 +3305,7 @@ fn definition_semantics(definition: &StateTreeDefinition) -> DefinitionSemantics
                     })
                     .collect(),
             }),
-        timers: compiled.timers.to_vec(),
+        timers: compiled.timers.iter().map(|timer| timer.duration).collect(),
         events: compiled.events.to_vec(),
         event_requirements: compiled
             .event_requirements

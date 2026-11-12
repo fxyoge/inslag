@@ -68,7 +68,7 @@ const RUNNING: &str = r#"
         <ist:activity id="job" name="work"/>
         <transition event="early"><assign location="count" expr="count + 1"/></transition>
         <transition event="late"><assign location="count" expr="count + 10"/></transition>
-        <transition ist:after="10s" target="done"/>
+        <transition ist:after="10" target="done"/>
       </state>
       <state id="unused"><onentry><raise event="late"/></onentry></state>
       <final id="done"/>

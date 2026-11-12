@@ -4,6 +4,8 @@
 //! expressions. [`compile`] separately lowers the supported subset into the
 //! production runtime representation and rejects unsupported semantics.
 
+#[cfg(test)]
+mod after_tests;
 mod analysis;
 mod ast;
 mod compile;

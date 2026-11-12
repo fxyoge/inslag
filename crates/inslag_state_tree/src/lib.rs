@@ -81,7 +81,7 @@
 //! ```xml
 //! <datamodel><data id="health" expr="100"/></datamodel>
 //! <state id="waiting">
-//!   <transition ist:after="250ms" cond="health > 0" target="ready">
+//!   <transition ist:after="0.25" cond="health > 0" target="ready">
 //!     <assign location="health" expr="health - 1"/>
 //!   </transition>
 //! </state>
