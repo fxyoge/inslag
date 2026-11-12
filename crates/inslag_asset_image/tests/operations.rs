@@ -28,7 +28,7 @@ fn frame(color: [u8; 4], depth: f32, pose: u32) -> Frame {
 }
 fn output(asset: Asset<Frames>) -> Result<Image> {
     let root = tempfile::tempdir()?;
-    fs::write(root.path().join("Cargo.lock"), "lock")?;
+    fs::write(root.path().join("Cargo.lock"), "version=4\n")?;
     let mut p = Pipeline::new(root.path())?;
     p.export("image.png", png(asset, 0))?;
     p.generate()?;

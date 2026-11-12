@@ -31,7 +31,7 @@ impl Operation for Fixture {
 #[test]
 fn published_stylesheets_derive_relative_urls_variants_and_frames() -> Result<()> {
     let root = tempfile::tempdir()?;
-    fs::write(root.path().join("Cargo.lock"), "lock")?;
+    fs::write(root.path().join("Cargo.lock"), "version=4\n")?;
     let mut p = Pipeline::new(root.path())?;
     let sheet = p.export(
         "textures/sheet.aseprite",
@@ -55,7 +55,7 @@ fn published_stylesheets_derive_relative_urls_variants_and_frames() -> Result<()
 #[test]
 fn invalid_selectors_fail_instead_of_injecting_css() -> Result<()> {
     let root = tempfile::tempdir()?;
-    fs::write(root.path().join("Cargo.lock"), "lock")?;
+    fs::write(root.path().join("Cargo.lock"), "version=4\n")?;
     let mut p = Pipeline::new(root.path())?;
     let sheet = p.export(
         "sheet.aseprite",

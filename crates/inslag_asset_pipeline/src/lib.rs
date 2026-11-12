@@ -8,6 +8,7 @@
 //! from build.rs; declare every input through [`Operation::dependencies`].
 
 mod fingerprint;
+mod lockfile;
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
@@ -186,7 +187,75 @@ pub struct Pipeline {
     published: PathBuf,
     cache: PathBuf,
     exports: Vec<Export>,
-    lockfile: String,
+    lockfile: lockfile::Lockfile,
+}
+
+pub struct LegacyPackage {
+    provider: String,
+    implementation: String,
+}
+
+impl LegacyPackage {
+    pub fn from_manifest(directory: impl AsRef<Path>, previous_manifest: &[u8]) -> Result<Self> {
+        let directory = directory.as_ref();
+        let manifest: toml::Value =
+            toml::from_str(&fs::read_to_string(directory.join("Cargo.toml"))?)?;
+        let previous: toml::Value = toml::from_str(std::str::from_utf8(previous_manifest)?)?;
+        let mut normalized = manifest.clone();
+        normalize_git_revisions(&mut normalized, &previous);
+        if normalized != previous {
+            return Err(invalid(
+                "legacy package migration permits only git revision changes",
+            ));
+        }
+        let name = manifest
+            .get("package")
+            .and_then(|package| package.get("name"))
+            .and_then(toml::Value::as_str)
+            .ok_or_else(|| invalid("missing provider package name"))?;
+        Ok(Self {
+            provider: name.replace('-', "_"),
+            implementation: fingerprint::package_fingerprint(
+                directory,
+                &[],
+                Some(previous_manifest),
+                false,
+            )?,
+        })
+    }
+}
+
+fn normalize_git_revisions(current: &mut toml::Value, previous: &toml::Value) {
+    for section in ["dependencies", "build-dependencies", "dev-dependencies"] {
+        if let Some(current) = current.get_mut(section).and_then(toml::Value::as_table_mut)
+            && let Some(previous) = previous.get(section).and_then(toml::Value::as_table)
+        {
+            for (name, dependency) in current {
+                if let Some(previous) = previous.get(name)
+                    && dependency
+                        .get("git")
+                        .and_then(toml::Value::as_str)
+                        .is_some()
+                    && dependency.get("git") == previous.get("git")
+                    && let Some(revision) = previous.get("rev")
+                    && dependency.get("rev").is_some()
+                {
+                    dependency["rev"] = revision.clone();
+                }
+            }
+        }
+    }
+    if let Some(current) = current
+        .get_mut("target")
+        .and_then(toml::Value::as_table_mut)
+        && let Some(previous) = previous.get("target").and_then(toml::Value::as_table)
+    {
+        for (target, current) in current {
+            if let Some(previous) = previous.get(target) {
+                normalize_git_revisions(current, previous);
+            }
+        }
+    }
 }
 
 impl Pipeline {
@@ -197,7 +266,7 @@ impl Pipeline {
             .map(|p| p.join("Cargo.lock"))
             .find(|p| p.is_file())
             .ok_or_else(|| invalid("asset projects require a Cargo.lock"))?;
-        let lockfile = digest_file(&lock)?;
+        let lockfile = lockfile::Lockfile::parse(&fs::read(&lock)?)?;
         Ok(Self {
             published: root.join("assets/generated"),
             cache: root.join("target/inslag-assets"),
@@ -253,7 +322,27 @@ impl Pipeline {
                 Ok(())
             }
             [action] if action == "check" => self.check(),
-            _ => Err(invalid("usage: <asset tool> generate | check")),
+            [
+                action,
+                previous_lock,
+                previous_implementation,
+                packages @ ..,
+            ] if action == "migrate-lock" && packages.len() % 2 == 0 => {
+                let packages = packages
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|args| LegacyPackage::from_manifest(&args[0], &fs::read(&args[1])?))
+                    .collect::<Result<Vec<_>>>()?;
+                self.migrate_lock(
+                    &fs::read(previous_lock)?,
+                    previous_implementation,
+                    &packages,
+                )
+            }
+            _ => Err(invalid(
+                "usage: <asset tool> generate | check | migrate-lock <previous Cargo.lock> <previous pipeline implementation> [<package directory> <previous Cargo.toml>]...",
+            )),
         }
     }
     pub fn check(self) -> Result<()> {
@@ -265,8 +354,10 @@ impl Pipeline {
                     "missing generated assets: {e}; run the asset tool with generate"
                 ))
             })?)?;
-        if manifest.version != 1 {
-            return Err(invalid("unsupported asset manifest; regenerate assets"));
+        if manifest.version != 2 {
+            return Err(invalid(
+                "unsupported asset manifest; regenerate assets or migrate its lockfile receipts",
+            ));
         }
         let mut evaluator = Evaluator::new(&self, Some(&manifest));
         let mut roots = BTreeMap::new();
@@ -293,6 +384,127 @@ impl Pipeline {
                 )));
             }
         }
+        Ok(())
+    }
+    pub fn migrate_lock(
+        self,
+        previous_lock: &[u8],
+        previous_implementation: &str,
+        packages: &[LegacyPackage],
+    ) -> Result<()> {
+        fs::create_dir_all(&self.cache)?;
+        let _evaluation_lock = lock(&self.cache.join("generate.lock"))?;
+        reject_symlinks(&self.root, self.published.strip_prefix(&self.root)?)?;
+        reject_symlinks(&self.published, Path::new(MANIFEST))?;
+        reject_symlinks(&self.published, Path::new(".inslag-assets.lock"))?;
+        let _publication = lock(&self.published.join(".inslag-assets.lock"))?;
+        let manifest: Manifest = serde_json::from_slice(&fs::read(self.published.join(MANIFEST))?)?;
+        if manifest.version != 1 {
+            return Err(invalid("lockfile migration requires a version 1 manifest"));
+        }
+        let mut providers = BTreeSet::new();
+        let mut seen = BTreeSet::new();
+        let mut pending = self
+            .exports
+            .iter()
+            .map(|export| export.job.clone())
+            .collect::<Vec<_>>();
+        while let Some(job) = pending.pop() {
+            if seen.insert(Arc::as_ptr(&job) as usize) {
+                providers.insert(
+                    job.name
+                        .split("::")
+                        .next()
+                        .unwrap_or(job.name)
+                        .replace('-', "_"),
+                );
+                pending.extend(
+                    job.operation
+                        .dependencies()
+                        .into_iter()
+                        .map(|dependency| dependency.0),
+                );
+            }
+        }
+        self.lockfile
+            .validate_migration(&lockfile::Lockfile::parse(previous_lock)?, &providers)?;
+        let mut evaluator = Evaluator::new(&self, None);
+        evaluator.legacy = Some(Legacy {
+            manifest: &manifest,
+            implementation: previous_implementation,
+            lockfile: digest(previous_lock),
+            packages: packages
+                .iter()
+                .map(|package| (package.provider.as_str(), package.implementation.as_str()))
+                .collect(),
+        });
+        let mut previous_roots = BTreeMap::new();
+        let mut roots = BTreeMap::new();
+        for export in &self.exports {
+            let record = evaluator.evaluate(&export.job)?;
+            previous_roots.insert(
+                export.path.clone(),
+                Root {
+                    spec: evaluator.previous_specs[&(Arc::as_ptr(&export.job) as usize)].clone(),
+                    value: record.value.clone(),
+                },
+            );
+            roots.insert(
+                export.path.clone(),
+                Root {
+                    spec: record.spec,
+                    value: record.value,
+                },
+            );
+        }
+        if previous_roots != manifest.roots || manifest.files.keys().ne(roots.keys()) {
+            return Err(invalid("asset exports changed; regeneration is required"));
+        }
+        for (path, hash) in &manifest.files {
+            safe_relative(path)?;
+            reject_symlinks(&self.published, path)?;
+            if digest_file(&self.published.join(path)).as_ref().ok() != Some(hash) {
+                return Err(invalid(format!(
+                    "missing or corrupt generated asset {}; regeneration is required",
+                    path.display()
+                )));
+            }
+        }
+        for (id, record) in &evaluator.memo {
+            let prior = &manifest.records[&evaluator.previous_specs[id]];
+            let old_value = value_path(&self.cache, &prior.content);
+            if fs::symlink_metadata(&old_value).is_ok_and(|metadata| metadata.is_file())
+                && digest_file(&old_value).as_ref().ok() == Some(&record.value)
+            {
+                let new_value = value_path(&self.cache, &record.content);
+                if !new_value.exists() {
+                    fs::create_dir_all(new_value.parent().unwrap())?;
+                    fs::hard_link(&old_value, &new_value)?;
+                }
+                if digest_file(&new_value).as_ref().ok() != Some(&record.value) {
+                    return Err(invalid("artifact cache changed during migration"));
+                }
+                let bytes = serde_json::to_vec(record)?;
+                write_changed(&new_value.with_extension("json"), &bytes)?;
+                write_changed(
+                    &self
+                        .cache
+                        .join("specs")
+                        .join(format!("{}.json", record.spec)),
+                    &bytes,
+                )?;
+            }
+        }
+        let upgraded = Manifest {
+            version: 2,
+            records: evaluator.records,
+            roots,
+            files: manifest.files.clone(),
+        };
+        write_changed(
+            &self.published.join(MANIFEST),
+            &serde_json::to_vec_pretty(&upgraded)?,
+        )?;
         Ok(())
     }
     pub fn generate(self) -> Result<Report> {
@@ -341,7 +553,7 @@ impl Pipeline {
             }
         }
         let manifest = Manifest {
-            version: 1,
+            version: 2,
             records: evaluator.records.clone(),
             roots,
             files: files.iter().map(|(p, b)| (p.clone(), digest(b))).collect(),
@@ -464,20 +676,30 @@ struct Evaluator<'a> {
     memo: BTreeMap<usize, Record>,
     records: BTreeMap<String, Record>,
     report: Report,
-    lockfile: String,
+    lockfiles: BTreeMap<String, String>,
+    legacy: Option<Legacy<'a>>,
+    previous_specs: BTreeMap<usize, String>,
     visiting: BTreeSet<usize>,
+}
+
+struct Legacy<'a> {
+    manifest: &'a Manifest,
+    implementation: &'a str,
+    lockfile: String,
+    packages: BTreeMap<&'a str, &'a str>,
 }
 
 impl<'a> Evaluator<'a> {
     fn new(pipeline: &'a Pipeline, check: Option<&'a Manifest>) -> Self {
-        let lockfile = pipeline.lockfile.clone();
         Self {
             pipeline,
             check,
             memo: BTreeMap::new(),
             records: BTreeMap::new(),
             report: Report::default(),
-            lockfile,
+            lockfiles: BTreeMap::new(),
+            legacy: None,
+            previous_specs: BTreeMap::new(),
             visiting: BTreeSet::new(),
         }
     }
@@ -495,15 +717,67 @@ impl<'a> Evaluator<'a> {
             .iter()
             .map(|d| self.evaluate(&d.0).map(|r| r.value))
             .collect::<Result<Vec<_>>>()?;
+        let provider = job.name.split("::").next().unwrap_or(job.name);
+        if !self.lockfiles.contains_key(provider) {
+            self.lockfiles.insert(
+                provider.into(),
+                self.pipeline.lockfile.fingerprint(job.name)?,
+            );
+        }
         let spec = digest(&serde_json::to_vec(&(
             IMPLEMENTATION,
-            &self.lockfile,
+            &self.lockfiles[provider],
             job.name,
             job.output,
             job.operation.implementation(),
-            descriptor,
-            dependencies,
+            &descriptor,
+            &dependencies,
         ))?);
+        if let Some(legacy) = &self.legacy {
+            let implementation = legacy
+                .packages
+                .get(provider)
+                .copied()
+                .unwrap_or_else(|| job.operation.implementation());
+            let previous_spec = digest(&serde_json::to_vec(&(
+                legacy.implementation,
+                &legacy.lockfile,
+                job.name,
+                job.output,
+                implementation,
+                &descriptor,
+                &dependencies,
+            ))?);
+            let prior = legacy.manifest.records.get(&previous_spec).ok_or_else(|| {
+                invalid(format!(
+                    "{} implementation or parameters changed; regeneration is required",
+                    job.name
+                ))
+            })?;
+            let mut paths: BTreeSet<_> = job.operation.sources().into_iter().collect();
+            paths.extend(prior.sources.keys().cloned());
+            let sources = hash_sources(&self.pipeline.root, &paths)?;
+            if sources != prior.sources
+                || prior.content != digest(&serde_json::to_vec(&(&previous_spec, &sources))?)
+            {
+                return Err(invalid(format!(
+                    "{} sources changed; regeneration is required",
+                    job.name
+                )));
+            }
+            let record = Record {
+                spec: spec.clone(),
+                sources,
+                content: digest(&serde_json::to_vec(&(&spec, &prior.sources))?),
+                value: prior.value.clone(),
+                provenance: prior.provenance.clone(),
+            };
+            self.previous_specs.insert(id, previous_spec);
+            self.records.insert(spec, record.clone());
+            self.memo.insert(id, record.clone());
+            self.visiting.remove(&id);
+            return Ok(record);
+        }
         let index = self
             .pipeline
             .cache

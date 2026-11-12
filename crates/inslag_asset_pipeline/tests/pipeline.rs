@@ -9,6 +9,8 @@ use std::{
     },
 };
 
+const LOCK: &str = "version=4\n[[package]]\nname='pipeline'\nversion='0.1.0'\ndependencies=['codec']\n[[package]]\nname='codec'\nversion='1.0.0'\n";
+
 #[derive(Serialize)]
 struct Source {
     value: String,
@@ -60,11 +62,6 @@ impl Operation for Same {
     }
 }
 
-fn project() -> Result<tempfile::TempDir> {
-    let root = tempfile::tempdir()?;
-    fs::write(root.path().join("Cargo.lock"), "lock")?;
-    Ok(root)
-}
 fn source(value: &str, calls: &Arc<AtomicUsize>) -> Asset<Bytes> {
     Asset::new(Source {
         value: value.into(),
@@ -310,9 +307,193 @@ fn corrupt_cache_is_repaired_and_lock_changes_invalidate_verification() -> Resul
     assert_eq!(pipeline()?.generate()?.executed, 1);
     fs::write(
         root.path().join("Cargo.lock"),
-        "changed dependency resolution",
+        LOCK.replace("version='1.0.0'", "version='2.0.0'"),
     )?;
     assert!(pipeline()?.check().is_err());
     assert_eq!(pipeline()?.generate()?.executed, 1);
     Ok(())
+}
+
+#[test]
+fn unrelated_workspace_dependencies_do_not_invalidate_generated_assets() -> Result<()> {
+    let root = project()?;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let pipeline = || -> Result<Pipeline> {
+        let mut pipeline = Pipeline::new(root.path())?;
+        pipeline.export("result", source("data", &calls))?;
+        Ok(pipeline)
+    };
+    pipeline()?.generate()?;
+    fs::write(
+        root.path().join("Cargo.lock"),
+        format!(
+            "{LOCK}\n[[package]]\nname='game'\nversion='0.1.0'\ndependencies=['test-helper']\n[[package]]\nname='test-helper'\nversion='3.0.0'\n"
+        ),
+    )?;
+    pipeline()?.check()?;
+    assert_eq!(pipeline()?.generate()?.executed, 0);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+fn legacy_project() -> Result<(tempfile::TempDir, Arc<AtomicUsize>)> {
+    let root = project()?;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let operation = Source {
+        value: "data".into(),
+        file: Some("input".into()),
+        extra: None,
+        fail: false,
+        calls: calls.clone(),
+    };
+    fs::write(root.path().join("input"), "source")?;
+    let descriptor = serde_json::to_value(&operation)?;
+    let mut pipeline = Pipeline::new(root.path())?;
+    pipeline.export("result", Asset::new(operation))?;
+    pipeline.generate()?;
+    let path = root.path().join("assets/generated/.inslag-assets.json");
+    let mut manifest: serde_json::Value = serde_json::from_slice(&fs::read(&path)?)?;
+    let mut record = manifest["records"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap()
+        .clone();
+    let old_spec = blake3::hash(&serde_json::to_vec(&(
+        "legacy-pipeline",
+        blake3::hash(LOCK.as_bytes()).to_string(),
+        std::any::type_name::<Source>(),
+        std::any::type_name::<Bytes>(),
+        "test-source",
+        descriptor,
+        Vec::<String>::new(),
+    ))?)
+    .to_string();
+    let old_content =
+        blake3::hash(&serde_json::to_vec(&(&old_spec, &record["sources"]))?).to_string();
+    let cache = root.path().join("target/inslag-assets");
+    let current_content = record["content"].as_str().unwrap().to_string();
+    let current_spec = record["spec"].as_str().unwrap().to_string();
+    fs::create_dir_all(cache.join("values").join(&old_content))?;
+    fs::copy(
+        cache
+            .join("values")
+            .join(&current_content)
+            .join("value.bin"),
+        cache.join("values").join(&old_content).join("value.bin"),
+    )?;
+    fs::remove_dir_all(cache.join("values").join(&current_content))?;
+    fs::remove_file(cache.join("specs").join(format!("{current_spec}.json")))?;
+    record["spec"] = old_spec.clone().into();
+    record["content"] = old_content.into();
+    manifest["version"] = 1.into();
+    manifest["records"] = serde_json::json!({old_spec.clone(): record});
+    manifest["roots"]["result"]["spec"] = old_spec.into();
+    fs::write(path, serde_json::to_vec_pretty(&manifest)?)?;
+    Ok((root, calls))
+}
+
+fn legacy_pipeline(root: &std::path::Path, calls: &Arc<AtomicUsize>) -> Result<Pipeline> {
+    let mut pipeline = Pipeline::new(root)?;
+    pipeline.export(
+        "result",
+        Asset::new(Source {
+            value: "data".into(),
+            file: Some("input".into()),
+            extra: None,
+            fail: false,
+            calls: calls.clone(),
+        }),
+    )?;
+    Ok(pipeline)
+}
+
+#[test]
+fn legacy_migration_preserves_pixels_and_cached_results_without_executing_processors() -> Result<()>
+{
+    for cache in [false, true] {
+        let (root, calls) = legacy_project()?;
+        let output = root.path().join("assets/generated/result");
+        let bytes = fs::read(&output)?;
+        let modified = fs::metadata(&output)?.modified()?;
+        if !cache {
+            fs::remove_dir_all(root.path().join("target"))?;
+        }
+        assert!(legacy_pipeline(root.path(), &calls)?.check().is_err());
+        legacy_pipeline(root.path(), &calls)?.migrate_lock(
+            LOCK.as_bytes(),
+            "legacy-pipeline",
+            &[],
+        )?;
+        legacy_pipeline(root.path(), &calls)?.check()?;
+        assert_eq!(fs::read(&output)?, bytes);
+        assert_eq!(fs::metadata(&output)?.modified()?, modified);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        if cache {
+            assert_eq!(
+                legacy_pipeline(root.path(), &calls)?.generate()?.executed,
+                0
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn legacy_migration_rejects_changed_inputs_dependencies_outputs_and_parameters_atomically()
+-> Result<()> {
+    for change in ["input", "dependency", "output", "parameter"] {
+        let (root, calls) = legacy_project()?;
+        let path = root.path().join("assets/generated/.inslag-assets.json");
+        let before = fs::read(&path)?;
+        match change {
+            "input" => fs::write(root.path().join("input"), "changed")?,
+            "dependency" => fs::write(
+                root.path().join("Cargo.lock"),
+                LOCK.replace("version='1.0.0'", "version='2.0.0'"),
+            )?,
+            "output" => fs::write(root.path().join("assets/generated/result"), "corrupt")?,
+            _ => {}
+        }
+        let pipeline = if change == "parameter" {
+            let mut pipeline = Pipeline::new(root.path())?;
+            pipeline.export("result", source("changed", &calls))?;
+            pipeline
+        } else {
+            legacy_pipeline(root.path(), &calls)?
+        };
+        assert!(
+            pipeline
+                .migrate_lock(LOCK.as_bytes(), "legacy-pipeline", &[])
+                .is_err(),
+            "accepted changed {change}"
+        );
+        assert_eq!(fs::read(path)?, before);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn legacy_manifest_overrides_cannot_hide_dependency_requirement_changes() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let previous = "[package]\nname='provider'\nversion='0.1.0'\n[dependencies]\ncodec={git='https://example.invalid/codec',rev='old'}\n";
+    fs::write(
+        root.path().join("Cargo.toml"),
+        previous.replace("rev='old'", "rev='new'"),
+    )?;
+    assert!(LegacyPackage::from_manifest(root.path(), previous.as_bytes()).is_ok());
+    fs::write(
+        root.path().join("Cargo.toml"),
+        format!("{previous}other='2'\n"),
+    )?;
+    assert!(LegacyPackage::from_manifest(root.path(), previous.as_bytes()).is_err());
+    Ok(())
+}
+
+fn project() -> Result<tempfile::TempDir> {
+    let root = tempfile::tempdir()?;
+    fs::write(root.path().join("Cargo.lock"), LOCK)?;
+    Ok(root)
 }
