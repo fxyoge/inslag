@@ -17,23 +17,25 @@ Registrations and consumers must be in the same crate, and consumed values must 
 ### Example
 
 ```rust,no_run
-#[derive(Message)]
+#[derive(Message, StateTreeInput)]
 enum Command {
-    Start,
-    Pause,
+    #[state_tree(name = "arcade.start")]
+    Start {},
+    #[state_tree(name = "arcade.pause")]
+    Pause {},
 }
 
 fn configure(config: &mut World) {
     config
-        .add_state_tree_effect("arcade.start", |_, _| Ok(Command::Start))
-        .add_state_tree_effect("arcade.pause", |_, _| Ok(Command::Pause));
+        .add_state_tree_effect::<Command>("arcade.start")
+        .add_state_tree_effect::<Command>("arcade.pause");
 }
 
 fn handle_commands(mut commands: MessageReader<Command>) {
     for command in commands.read() {
         match command {
-            Command::Start => start_game(),
-            Command::Pause => pause_game(),
+            Command::Start {} => start_game(),
+            Command::Pause {} => pause_game(),
         }
     }
 }
@@ -42,15 +44,15 @@ fn handle_commands(mut commands: MessageReader<Command>) {
 Use instead:
 
 ```rust,no_run
-#[derive(Message)]
+#[derive(Message, StateTreeInput)]
 struct Start;
-#[derive(Message)]
+#[derive(Message, StateTreeInput)]
 struct Pause;
 
 fn configure(config: &mut World) {
     config
-        .add_state_tree_effect("arcade.start", |_, _| Ok(Start))
-        .add_state_tree_effect("arcade.pause", |_, _| Ok(Pause));
+        .add_state_tree_effect::<Start>("arcade.start")
+        .add_state_tree_effect::<Pause>("arcade.pause");
 }
 
 fn start(mut messages: MessageReader<Start>) {

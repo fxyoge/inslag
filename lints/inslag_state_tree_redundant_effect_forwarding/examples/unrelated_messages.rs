@@ -15,16 +15,25 @@ struct Unrelated {
 
 fn configure(config: &mut World) {
     config
-        .add_state_tree_effect("game.start", |_, _| {
-            Ok(Registered {
+        .add_state_tree_effect::<Registered>("game.start")
+        .add_state_tree_effect::<Registered>("game.pause");
+}
+
+impl state_tree::StateTreeInput for Registered {
+    fn from_state_tree_input(
+        context: &state_tree::StateTreeContext<'_>,
+        _: &mut state_tree::StateTreeArgs,
+    ) -> Result<Self, state_tree::StateTreeEffectError> {
+        match context.effect_name() {
+            Some("game.start") => Ok(Registered {
                 action: "start".into(),
-            })
-        })
-        .add_state_tree_effect("game.pause", |_, _| {
-            Ok(Registered {
+            }),
+            Some("game.pause") => Ok(Registered {
                 action: "pause".into(),
-            })
-        });
+            }),
+            _ => unreachable!(),
+        }
+    }
 }
 
 fn consume(mut commands: MessageReader<Unrelated>) {

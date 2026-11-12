@@ -12,8 +12,21 @@ enum Command {
 
 fn configure(config: &mut World) {
     config
-        .add_state_tree_effect("level.start", |_, _| Ok(Command::Start))
-        .add_state_tree_effect("level.pause", |_, _| Ok(Command::Pause));
+        .add_state_tree_effect::<Command>("level.start")
+        .add_state_tree_effect::<Command>("level.pause");
+}
+
+impl state_tree::StateTreeInput for Command {
+    fn from_state_tree_input(
+        context: &state_tree::StateTreeContext<'_>,
+        _: &mut state_tree::StateTreeArgs,
+    ) -> Result<Self, state_tree::StateTreeEffectError> {
+        match context.effect_name() {
+            Some("level.start") => Ok(Command::Start),
+            Some("level.pause") => Ok(Command::Pause),
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[cfg_attr(

@@ -120,12 +120,6 @@ fn focus_event_data(event: &UiFocusChanged) -> LuauValue {
     )]))
 }
 
-enum Movement {
-    Next,
-    Previous,
-    Activate,
-}
-
 #[derive(Clone, Copy, StateTreeInput)]
 #[state_tree(rename_all = "snake_case")]
 enum Direction {
@@ -134,22 +128,20 @@ enum Direction {
 }
 
 #[derive(Message, StateTreeInput)]
-enum Navigation {
-    #[state_tree(name = "ui.focus")]
-    Focus {
-        #[state_tree(owner)]
-        owner: Entity,
-        #[state_tree(activity = "view")]
-        token: Option<StateTreeActivityToken<UiRender>>,
-        direction: Direction,
-    },
-    #[state_tree(name = "ui.activate")]
-    Activate {
-        #[state_tree(owner)]
-        owner: Entity,
-        #[state_tree(activity = "view")]
-        token: Option<StateTreeActivityToken<UiRender>>,
-    },
+struct FocusView {
+    #[state_tree(owner)]
+    owner: Entity,
+    #[state_tree(activity = "view")]
+    token: Option<StateTreeActivityToken<UiRender>>,
+    direction: Direction,
+}
+
+#[derive(Message, StateTreeInput)]
+struct ActivateView {
+    #[state_tree(owner)]
+    owner: Entity,
+    #[state_tree(activity = "view")]
+    token: Option<StateTreeActivityToken<UiRender>>,
 }
 
 fn project_position(position: Option<Vec2>) -> LuauValue {
@@ -177,8 +169,8 @@ impl Plugin for KuiStateTreePlugin {
             .add_state_tree_event::<UiReady>()
             .add_state_tree_event::<UiFocusChanged>()
             .add_state_tree_activity::<UiRender>("ui.render")
-            .add_state_tree_effect::<Navigation>("ui.focus")
-            .add_state_tree_effect::<Navigation>("ui.activate")
+            .add_state_tree_effect::<FocusView>("ui.focus")
+            .add_state_tree_effect::<ActivateView>("ui.activate")
             .init_resource::<ViewIndex>();
         if !app.is_plugin_added::<bevy::input_focus::InputFocusPlugin>() {
             app.add_plugins(bevy::input_focus::InputFocusPlugin);
@@ -207,7 +199,12 @@ impl Plugin for KuiStateTreePlugin {
                 .in_set(KuiSystems::Prepare),
         )
         .add_systems(Update, report_failures.in_set(KuiSystems::Outcomes))
-        .add_systems(Update, navigate.in_set(StateTreeSet::HandleEffects))
+        .add_systems(
+            Update,
+            (focus_view, activate_view)
+                .chain()
+                .in_set(StateTreeSet::HandleEffects),
+        )
         .add_systems(PostUpdate, report_ready.after(bevy::ui::UiSystems::Layout))
         .add_observer(forward_action)
         .add_observer(remove_view);
@@ -573,8 +570,8 @@ fn report_ready(
     }
 }
 
-fn navigate(
-    mut requests: MessageReader<Navigation>,
+fn focus_view(
+    mut requests: MessageReader<FocusView>,
     index: Res<ViewIndex>,
     mut views: Query<(&StateTreeView, &KuiView, &mut FocusScope)>,
     controllers: Query<&StateTreeInstance>,
@@ -583,27 +580,11 @@ fn navigate(
     actions: crate::interaction::Actions,
     mut focus: ResMut<bevy::input_focus::InputFocus>,
     mut visible: ResMut<bevy::input_focus::InputFocusVisible>,
-    mut commands: Commands,
     mut events: EntityStateTreeEventWriter,
 ) {
     for request in requests.read() {
-        let (owner, token, movement) = match request {
-            Navigation::Focus {
-                owner,
-                token,
-                direction,
-            } => (
-                *owner,
-                *token,
-                match direction {
-                    Direction::Next => Movement::Next,
-                    Direction::Previous => Movement::Previous,
-                },
-            ),
-            Navigation::Activate { owner, token } => (*owner, *token, Movement::Activate),
-        };
-        let Some(token) = token else {
-            warn!(?owner, "UI navigation: view activity is not active");
+        let Some(token) = request.token else {
+            warn!(owner = ?request.owner, "UI navigation: view activity is not active");
             continue;
         };
         if !controllers
@@ -613,28 +594,14 @@ fn navigate(
             continue;
         }
         let Some(entity) = index.0.get(&token).copied() else {
-            warn!(?owner, "UI navigation: view is unavailable");
+            warn!(owner = ?request.owner, "UI navigation: view is unavailable");
             continue;
         };
         let Ok((mount, view, mut scope)) = views.get_mut(entity) else {
             continue;
         };
         if view.status() != &KuiViewStatus::Ready {
-            warn!(?owner, "UI navigation: view is not ready");
-            continue;
-        }
-        if matches!(movement, Movement::Activate) {
-            // Resolve only the focused control, never scan other controls or
-            // substitute an available control when focus has become stale.
-            if let Some(target) = focus.get()
-                && let Ok((index, binding)) = buttons.get(target)
-                && index.0 >= 0
-                && binding.view == entity
-                && binding.events.contains_key("on-click")
-                && actions.enabled(target)
-            {
-                actions.emit(&mut commands, target, "on-click", default());
-            }
+            warn!(owner = ?request.owner, "UI navigation: view is not ready");
             continue;
         }
         if scope.dirty {
@@ -683,10 +650,10 @@ fn navigate(
         // Check availability lazily in navigation order; a warmed next/previous
         // request visits only skipped unavailable controls and its destination.
         let destination = (1..=count).find_map(|step| {
-            let index = match (current, &movement) {
-                (Some(index), Movement::Previous) => (index + count - step) % count,
+            let index = match (current, request.direction) {
+                (Some(index), Direction::Previous) => (index + count - step) % count,
                 (Some(index), _) => (index + step) % count,
-                (None, Movement::Previous) => count - step,
+                (None, Direction::Previous) => count - step,
                 (None, _) => step - 1,
             };
             let entity = scope.ordered[index].1;
@@ -706,6 +673,51 @@ fn navigate(
                     view: mount.id.clone(),
                 },
             );
+        }
+    }
+}
+
+fn activate_view(
+    mut requests: MessageReader<ActivateView>,
+    index: Res<ViewIndex>,
+    views: Query<&KuiView>,
+    controllers: Query<&StateTreeInstance>,
+    buttons: Query<(&crate::runtime::TabIndex, &crate::runtime::ActionBindings)>,
+    actions: crate::interaction::Actions,
+    focus: Res<bevy::input_focus::InputFocus>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let Some(token) = request.token else {
+            warn!(owner = ?request.owner, "UI navigation: view activity is not active");
+            continue;
+        };
+        if !controllers
+            .get(token.entity())
+            .is_ok_and(|tree| tree.is_activity_active(token))
+        {
+            continue;
+        }
+        let Some(entity) = index.0.get(&token).copied() else {
+            warn!(owner = ?request.owner, "UI navigation: view is unavailable");
+            continue;
+        };
+        let Ok(view) = views.get(entity) else {
+            continue;
+        };
+        if view.status() != &KuiViewStatus::Ready {
+            warn!(owner = ?request.owner, "UI navigation: view is not ready");
+            continue;
+        }
+        // Stale focus must not activate a different available control.
+        if let Some(target) = focus.get()
+            && let Ok((index, binding)) = buttons.get(target)
+            && index.0 >= 0
+            && binding.view == entity
+            && binding.events.contains_key("on-click")
+            && actions.enabled(target)
+        {
+            actions.emit(&mut commands, target, "on-click", default());
         }
     }
 }

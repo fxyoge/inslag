@@ -1,5 +1,5 @@
 error: redundant forwarding of effects `game.confirm` and `game.back` through a shared message type
-  --> $DIR/borrowed_forwarding.rs:19:9
+  --> $DIR/borrowed_forwarding.rs:32:9
    |
 LL | /         match command.action {
 LL | |             "confirm" | "back" => {}
@@ -8,15 +8,15 @@ LL | |         }
    | |_________^
    |
 note: this effect fixes one discriminator value
-  --> $DIR/borrowed_forwarding.rs:13:32
+  --> $DIR/borrowed_forwarding.rs:13:43
    |
-LL |         .add_state_tree_effect("game.confirm", |_, _| Ok(Command { action: "confirm" }))
-   |                                ^^^^^^^^^^^^^^
+LL |         .add_state_tree_effect::<Command>("game.confirm")
+   |                                           ^^^^^^^^^^^^^^
 note: this effect fixes a different discriminator value
-  --> $DIR/borrowed_forwarding.rs:14:32
+  --> $DIR/borrowed_forwarding.rs:14:43
    |
-LL |         .add_state_tree_effect("game.back", |_, _| Ok(Command { action: "back" }));
-   |                                ^^^^^^^^^^^
+LL |         .add_state_tree_effect::<Command>("game.back");
+   |                                           ^^^^^^^^^^^
    = help: give each operation its own message type and consume it with `MessageReader<T>`
    = note: `#[deny(inslag_state_tree_redundant_effect_forwarding)]` on by default
 

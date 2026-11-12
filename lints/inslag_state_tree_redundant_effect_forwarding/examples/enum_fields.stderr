@@ -1,5 +1,5 @@
 error: redundant forwarding of effects `arcade.start` and `arcade.pause` through a shared message type
-  --> $DIR/enum_fields.rs:32:9
+  --> $DIR/enum_fields.rs:41:9
    |
 LL | /         match command.operation {
 LL | |             Operation::Start => {}
@@ -8,15 +8,15 @@ LL | |         }
    | |_________^
    |
 note: this effect fixes one discriminator value
-  --> $DIR/enum_fields.rs:18:32
+  --> $DIR/enum_fields.rs:18:43
    |
-LL |         .add_state_tree_effect("arcade.start", |_, _| {
-   |                                ^^^^^^^^^^^^^^
+LL |         .add_state_tree_effect::<Command>("arcade.start")
+   |                                           ^^^^^^^^^^^^^^
 note: this effect fixes a different discriminator value
-  --> $DIR/enum_fields.rs:23:32
+  --> $DIR/enum_fields.rs:19:43
    |
-LL |         .add_state_tree_effect("arcade.pause", |_, _| {
-   |                                ^^^^^^^^^^^^^^
+LL |         .add_state_tree_effect::<Command>("arcade.pause");
+   |                                           ^^^^^^^^^^^^^^
    = help: give each operation its own message type and consume it with `MessageReader<T>`
    = note: `#[deny(inslag_state_tree_redundant_effect_forwarding)]` on by default
 

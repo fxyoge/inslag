@@ -11,22 +11,19 @@ enum Command {
 struct FakeConfig;
 
 impl FakeConfig {
-    fn add_state_tree_effect(&mut self, _: &str, _: impl Fn() -> Command) -> &mut Self {
+    fn add_state_tree_effect<M: Message>(&mut self, _: &str) -> &mut Self {
         self
     }
 }
 
 mod lookalike {
     pub trait StateTreeExt {
-        fn add_state_tree_effect(
-            &mut self,
-            name: &str,
-            constructor: impl Fn() -> super::Command,
-        ) -> &mut Self;
+        fn add_state_tree_effect<M: bevy_ecs::message::Message>(&mut self, name: &str)
+        -> &mut Self;
     }
 
     impl StateTreeExt for super::FakeConfig {
-        fn add_state_tree_effect(&mut self, _: &str, _: impl Fn() -> super::Command) -> &mut Self {
+        fn add_state_tree_effect<M: bevy_ecs::message::Message>(&mut self, _: &str) -> &mut Self {
             self
         }
     }
@@ -34,10 +31,23 @@ mod lookalike {
 
 fn configure(config: &mut FakeConfig) {
     config
-        .add_state_tree_effect("arcade.start", || Command::Start)
-        .add_state_tree_effect("arcade.pause", || Command::Pause);
-    lookalike::StateTreeExt::add_state_tree_effect(config, "arcade.start", || Command::Start);
-    lookalike::StateTreeExt::add_state_tree_effect(config, "arcade.pause", || Command::Pause);
+        .add_state_tree_effect::<Command>("arcade.start")
+        .add_state_tree_effect::<Command>("arcade.pause");
+    lookalike::StateTreeExt::add_state_tree_effect::<Command>(config, "arcade.start");
+    lookalike::StateTreeExt::add_state_tree_effect::<Command>(config, "arcade.pause");
+}
+
+impl state_tree::StateTreeInput for Command {
+    fn from_state_tree_input(
+        context: &state_tree::StateTreeContext<'_>,
+        _: &mut state_tree::StateTreeArgs,
+    ) -> Result<Self, state_tree::StateTreeEffectError> {
+        match context.effect_name() {
+            Some("arcade.start") => Ok(Command::Start),
+            Some("arcade.pause") => Ok(Command::Pause),
+            _ => unreachable!(),
+        }
+    }
 }
 
 fn consume(mut commands: MessageReader<Command>) {

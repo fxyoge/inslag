@@ -1,5 +1,5 @@
 error: redundant forwarding of effects `arcade.start` and `arcade.pause` through a shared message type
-  --> $DIR/resolved_paths.rs:31:9
+  --> $DIR/resolved_paths.rs:44:9
    |
 LL | /         match command {
 LL | |             Renamed::Start => {}
@@ -8,15 +8,15 @@ LL | |         }
    | |_________^
    |
 note: this effect fixes one discriminator value
-  --> $DIR/resolved_paths.rs:22:49
+  --> $DIR/resolved_paths.rs:22:60
    |
-LL |     Registration::add_state_tree_effect(config, "arcade.start", |_, _| {
-   |                                                 ^^^^^^^^^^^^^^
+LL |     Registration::add_state_tree_effect::<Command>(config, "arcade.start");
+   |                                                            ^^^^^^^^^^^^^^
 note: this effect fixes a different discriminator value
-  --> $DIR/resolved_paths.rs:26:45
+  --> $DIR/resolved_paths.rs:23:56
    |
-LL |     Protocol::add_state_tree_effect(config, "arcade.pause", |_, _| Ok(Renamed::Pause));
-   |                                             ^^^^^^^^^^^^^^
+LL |     Protocol::add_state_tree_effect::<Renamed>(config, "arcade.pause");
+   |                                                        ^^^^^^^^^^^^^^
    = help: give each operation its own message type and consume it with `MessageReader<T>`
    = note: `#[deny(inslag_state_tree_redundant_effect_forwarding)]` on by default
 

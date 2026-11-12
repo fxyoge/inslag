@@ -11,18 +11,27 @@ struct Command {
 
 fn configure(config: &mut World) {
     config
-        .add_state_tree_effect("text.a", |_, args| {
-            Ok(Command {
+        .add_state_tree_effect::<Command>("text.a")
+        .add_state_tree_effect::<Command>("text.b");
+}
+
+impl state_tree::StateTreeInput for Command {
+    fn from_state_tree_input(
+        context: &state_tree::StateTreeContext<'_>,
+        args: &mut state_tree::StateTreeArgs,
+    ) -> Result<Self, state_tree::StateTreeEffectError> {
+        match context.effect_name() {
+            Some("text.a") => Ok(Command {
                 action: "a".into(),
                 value: args.take("value")?,
-            })
-        })
-        .add_state_tree_effect("text.b", |_, args| {
-            Ok(Command {
+            }),
+            Some("text.b") => Ok(Command {
                 action: "b".into(),
                 value: args.take("value")?,
-            })
-        });
+            }),
+            _ => unreachable!(),
+        }
+    }
 }
 
 fn consume(mut commands: MessageReader<Command>) {

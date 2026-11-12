@@ -1,56 +1,56 @@
 error: redundant forwarding of effects `game.confirm` and `game.back` through a shared message type
-  --> $DIR/string_conditions.rs:27:12
+  --> $DIR/string_conditions.rs:36:12
    |
 LL |         if command.action == "confirm" {
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |
 note: this effect fixes one discriminator value
-  --> $DIR/string_conditions.rs:13:32
+  --> $DIR/string_conditions.rs:13:43
    |
-LL |         .add_state_tree_effect("game.confirm", |_, _| {
-   |                                ^^^^^^^^^^^^^^
+LL |         .add_state_tree_effect::<Command>("game.confirm")
+   |                                           ^^^^^^^^^^^^^^
 note: this effect fixes a different discriminator value
-  --> $DIR/string_conditions.rs:18:32
+  --> $DIR/string_conditions.rs:14:43
    |
-LL |         .add_state_tree_effect("game.back", |_, _| {
-   |                                ^^^^^^^^^^^
+LL |         .add_state_tree_effect::<Command>("game.back");
+   |                                           ^^^^^^^^^^^
    = help: give each operation its own message type and consume it with `MessageReader<T>`
    = note: `#[deny(inslag_state_tree_redundant_effect_forwarding)]` on by default
 
 error: redundant forwarding of effects `game.back` and `game.confirm` through a shared message type
-  --> $DIR/string_conditions.rs:30:12
+  --> $DIR/string_conditions.rs:39:12
    |
 LL |         if "back" != command.action {
    |            ^^^^^^^^^^^^^^^^^^^^^^^^
    |
 note: this effect fixes one discriminator value
-  --> $DIR/string_conditions.rs:18:32
+  --> $DIR/string_conditions.rs:14:43
    |
-LL |         .add_state_tree_effect("game.back", |_, _| {
-   |                                ^^^^^^^^^^^
+LL |         .add_state_tree_effect::<Command>("game.back");
+   |                                           ^^^^^^^^^^^
 note: this effect fixes a different discriminator value
-  --> $DIR/string_conditions.rs:13:32
+  --> $DIR/string_conditions.rs:13:43
    |
-LL |         .add_state_tree_effect("game.confirm", |_, _| {
-   |                                ^^^^^^^^^^^^^^
+LL |         .add_state_tree_effect::<Command>("game.confirm")
+   |                                           ^^^^^^^^^^^^^^
    = help: give each operation its own message type and consume it with `MessageReader<T>`
 
 error: redundant forwarding of effects `game.confirm` and `game.back` through a shared message type
-  --> $DIR/string_conditions.rs:33:12
+  --> $DIR/string_conditions.rs:42:12
    |
 LL |         if let "confirm" = command.action.as_str() {
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |
 note: this effect fixes one discriminator value
-  --> $DIR/string_conditions.rs:13:32
+  --> $DIR/string_conditions.rs:13:43
    |
-LL |         .add_state_tree_effect("game.confirm", |_, _| {
-   |                                ^^^^^^^^^^^^^^
+LL |         .add_state_tree_effect::<Command>("game.confirm")
+   |                                           ^^^^^^^^^^^^^^
 note: this effect fixes a different discriminator value
-  --> $DIR/string_conditions.rs:18:32
+  --> $DIR/string_conditions.rs:14:43
    |
-LL |         .add_state_tree_effect("game.back", |_, _| {
-   |                                ^^^^^^^^^^^
+LL |         .add_state_tree_effect::<Command>("game.back");
+   |                                           ^^^^^^^^^^^
    = help: give each operation its own message type and consume it with `MessageReader<T>`
 
 error: aborting due to 3 previous errors

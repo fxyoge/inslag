@@ -10,16 +10,27 @@ struct Command {
 
 fn configure(config: &mut World) {
     config
-        .add_state_tree_effect("game.confirm", |_, _| {
-            Ok(Command {
+        .add_state_tree_effect::<Command>("game.confirm")
+        .add_state_tree_effect::<Command>("game.back");
+}
+
+impl state_tree::StateTreeInput for Command {
+    fn from_state_tree_input(
+        context: &state_tree::StateTreeContext<'_>,
+        _: &mut state_tree::StateTreeArgs,
+    ) -> Result<Self, state_tree::StateTreeEffectError> {
+        match context.effect_name() {
+            Some("game.confirm") => Ok(Command {
                 action: "confirm".into(),
-            })
-        })
-        .add_state_tree_effect("game.back", |_, _| {
-            let action = String::from("back");
-            let message = Command { action };
-            Ok(message)
-        });
+            }),
+            Some("game.back") => {
+                let action = String::from("back");
+                let message = Command { action };
+                Ok(message)
+            }
+            _ => unreachable!(),
+        }
+    }
 }
 
 fn consume(mut commands: MessageReader<Command>) {

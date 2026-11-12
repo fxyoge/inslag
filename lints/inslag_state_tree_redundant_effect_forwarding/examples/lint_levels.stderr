@@ -1,5 +1,5 @@
 error: redundant forwarding of effects `level.start` and `level.pause` through a shared message type
-  --> $DIR/lint_levels.rs:53:9
+  --> $DIR/lint_levels.rs:66:9
    |
 LL | /         match command {
 LL | |             Command::Start => {}
@@ -8,15 +8,15 @@ LL | |         }
    | |_________^
    |
 note: this effect fixes one discriminator value
-  --> $DIR/lint_levels.rs:15:32
+  --> $DIR/lint_levels.rs:15:43
    |
-LL |         .add_state_tree_effect("level.start", |_, _| Ok(Command::Start))
-   |                                ^^^^^^^^^^^^^
+LL |         .add_state_tree_effect::<Command>("level.start")
+   |                                           ^^^^^^^^^^^^^
 note: this effect fixes a different discriminator value
-  --> $DIR/lint_levels.rs:16:32
+  --> $DIR/lint_levels.rs:16:43
    |
-LL |         .add_state_tree_effect("level.pause", |_, _| Ok(Command::Pause));
-   |                                ^^^^^^^^^^^^^
+LL |         .add_state_tree_effect::<Command>("level.pause");
+   |                                           ^^^^^^^^^^^^^
    = help: give each operation its own message type and consume it with `MessageReader<T>`
    = note: `#[deny(inslag_state_tree_redundant_effect_forwarding)]` on by default
 

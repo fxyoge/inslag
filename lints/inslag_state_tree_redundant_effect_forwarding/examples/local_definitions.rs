@@ -9,23 +9,41 @@ pub enum Command {
 }
 
 pub trait StateTreeExt {
-    fn add_state_tree_effect(
-        &mut self,
-        name: &str,
-        constructor: impl Fn() -> Result<Command, ()>,
-    ) -> &mut Self;
+    fn add_state_tree_effect<M: Message + StateTreeInput>(&mut self, name: &str) -> &mut Self;
 }
 
 impl StateTreeExt for World {
-    fn add_state_tree_effect(&mut self, _: &str, _: impl Fn() -> Result<Command, ()>) -> &mut Self {
+    fn add_state_tree_effect<M: Message + StateTreeInput>(&mut self, _: &str) -> &mut Self {
         self
+    }
+}
+
+pub struct StateTreeContext;
+
+impl StateTreeContext {
+    pub fn effect_name(&self) -> Option<&str> {
+        None
+    }
+}
+
+pub trait StateTreeInput: Sized {
+    fn from_state_tree_input(context: &StateTreeContext) -> Result<Self, ()>;
+}
+
+impl StateTreeInput for Command {
+    fn from_state_tree_input(context: &StateTreeContext) -> Result<Self, ()> {
+        match context.effect_name() {
+            Some("arcade.start") => Ok(Command::Start),
+            Some("arcade.pause") => Ok(Command::Pause),
+            _ => unreachable!(),
+        }
     }
 }
 
 fn configure(world: &mut World) {
     world
-        .add_state_tree_effect("arcade.start", || Ok(Command::Start))
-        .add_state_tree_effect("arcade.pause", || Ok(Command::Pause));
+        .add_state_tree_effect::<Command>("arcade.start")
+        .add_state_tree_effect::<Command>("arcade.pause");
 }
 
 fn consume(mut commands: MessageReader<Command>) {

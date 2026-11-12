@@ -11,8 +11,20 @@ enum Command {
 
 fn configure(config: &mut World) {
     config
-        .add_state_tree_effect("arcade.start", |_, _| Ok(Command::Start))
-        .add_state_tree_effect("arcade.begin", |_, _| Ok(Command::Start));
+        .add_state_tree_effect::<Command>("arcade.start")
+        .add_state_tree_effect::<Command>("arcade.begin");
+}
+
+impl state_tree::StateTreeInput for Command {
+    fn from_state_tree_input(
+        context: &state_tree::StateTreeContext<'_>,
+        _: &mut state_tree::StateTreeArgs,
+    ) -> Result<Self, state_tree::StateTreeEffectError> {
+        match context.effect_name() {
+            Some("arcade.start" | "arcade.begin") => Ok(Command::Start),
+            _ => unreachable!(),
+        }
+    }
 }
 
 fn consume(mut commands: MessageReader<Command>) {

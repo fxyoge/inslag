@@ -8,8 +8,21 @@ struct Command(String);
 
 fn configure(config: &mut World) {
     config
-        .add_state_tree_effect("arcade.start", |_, _| Ok(Command("start".to_string())))
-        .add_state_tree_effect("arcade.pause", |_, _| Ok(Command("pause".into())));
+        .add_state_tree_effect::<Command>("arcade.start")
+        .add_state_tree_effect::<Command>("arcade.pause");
+}
+
+impl state_tree::StateTreeInput for Command {
+    fn from_state_tree_input(
+        context: &state_tree::StateTreeContext<'_>,
+        _: &mut state_tree::StateTreeArgs,
+    ) -> Result<Self, state_tree::StateTreeEffectError> {
+        match context.effect_name() {
+            Some("arcade.start") => Ok(Command("start".to_string())),
+            Some("arcade.pause") => Ok(Command("pause".into())),
+            _ => unreachable!(),
+        }
+    }
 }
 
 fn consume(mut commands: MessageReader<Command>) {

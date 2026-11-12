@@ -3,20 +3,18 @@
 use bevy_ecs::prelude::*;
 use state_tree::StateTreeExt;
 
-#[derive(Message, PartialEq)]
+#[derive(Message, PartialEq, state_tree::StateTreeInput)]
 enum Command {
+    #[state_tree(name = "arcade.start")]
     Start,
+    #[state_tree(name = "arcade.retry")]
     Retry { seed: u32 },
 }
 
 fn configure(config: &mut World) {
     config
-        .add_state_tree_effect("arcade.start", |_, _| Ok(Command::Start))
-        .add_state_tree_effect("arcade.retry", |_, args| {
-            Ok(Command::Retry {
-                seed: args.take("seed")?,
-            })
-        });
+        .add_state_tree_effect::<Command>("arcade.start")
+        .add_state_tree_effect::<Command>("arcade.retry");
 }
 
 fn consume(mut commands: MessageReader<Command>) {

@@ -3,17 +3,13 @@
 use bevy_ecs::prelude::*;
 use state_tree::StateTreeExt;
 
-#[derive(Message)]
+#[derive(Message, state_tree::StateTreeInput)]
 struct Command {
     action: String,
 }
 
 fn configure(config: &mut World) {
-    config.add_state_tree_effect("game.action", |_, args| {
-        Ok(Command {
-            action: args.take("action")?,
-        })
-    });
+    config.add_state_tree_effect::<Command>("game.action");
 }
 
 fn consume(mut commands: MessageReader<Command>) {

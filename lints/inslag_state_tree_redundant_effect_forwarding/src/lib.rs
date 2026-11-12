@@ -47,6 +47,19 @@ struct Registration<'tcx> {
     value: Value,
 }
 
+struct Effect<'tcx> {
+    name: Symbol,
+    span: Span,
+    input: ty::Instance<'tcx>,
+}
+
+struct Input<'tcx> {
+    constructor: DefId,
+    name: Symbol,
+    selector: Selector<'tcx>,
+    value: Value,
+}
+
 struct Dispatch<'tcx> {
     hir_id: HirId,
     span: Span,
@@ -56,7 +69,8 @@ struct Dispatch<'tcx> {
 
 #[derive(Default)]
 struct RedundantEffectForwarding<'tcx> {
-    registrations: Vec<Registration<'tcx>>,
+    effects: Vec<Effect<'tcx>>,
+    inputs: Vec<Input<'tcx>>,
     dispatches: Vec<Dispatch<'tcx>>,
 }
 
@@ -71,21 +85,40 @@ pub fn register_lints(_: &rustc_session::Session, store: &mut rustc_lint::LintSt
 
 impl<'tcx> LateLintPass<'tcx> for RedundantEffectForwarding<'tcx> {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
+        // Derived inputs route by effect name too; excluding expansion here would
+        // make the derive an escape hatch from the same rule as handwritten inputs.
+        if let ExprKind::Match(subject, arms, _) = expr.kind
+            && effect_name(cx, subject)
+            && arms.iter().all(|arm| arm.guard.is_none())
+            && let Some(constructor) = input_constructor(cx, expr)
+        {
+            for arm in arms {
+                let Some(output) = constructor_output(cx, arm.body) else {
+                    continue;
+                };
+                for name in effect_names(cx, arm.pat) {
+                    for (selector, value) in injected_values(cx, output) {
+                        self.inputs.push(Input {
+                            constructor,
+                            name,
+                            selector,
+                            value,
+                        });
+                    }
+                }
+            }
+        }
         if expr.span.from_expansion() {
             return;
         }
-        if let Some((name, constructor)) = effect_registration(cx, expr)
+        if let Some((name, input)) = effect_registration(cx, expr)
             && let Some(Value::String(name_value)) = constant(cx, name, 0)
-            && let Some(output) = constructor_output(cx, constructor)
         {
-            for (selector, value) in injected_values(cx, output) {
-                self.registrations.push(Registration {
-                    name: name_value,
-                    span: name.span,
-                    selector,
-                    value,
-                });
-            }
+            self.effects.push(Effect {
+                name: name_value,
+                span: name.span,
+                input,
+            });
         }
 
         let (subject, values) = match expr.kind {
@@ -125,16 +158,33 @@ impl<'tcx> LateLintPass<'tcx> for RedundantEffectForwarding<'tcx> {
     fn check_crate_post(&mut self, cx: &LateContext<'tcx>) {
         // Consumers can precede registrations or live in a different module.
         // Keep the originating HIR node so local lint levels still apply.
-        self.registrations
-            .sort_by_key(|registration| registration.span.lo());
+        let mut registrations = Vec::new();
+        for effect in &self.effects {
+            for input in &self.inputs {
+                if input.constructor == effect.input.def_id() && input.name == effect.name {
+                    registrations.push(Registration {
+                        name: effect.name,
+                        span: effect.span,
+                        selector: Selector {
+                            message: ty::EarlyBinder::bind(cx.tcx, input.selector.message)
+                                .instantiate(cx.tcx, effect.input.args)
+                                .skip_norm_wip(),
+                            field: input.selector.field,
+                        },
+                        value: input.value,
+                    });
+                }
+            }
+        }
+        registrations.sort_by_key(|registration| registration.span.lo());
         for dispatch in &self.dispatches {
-            let Some(first) = self.registrations.iter().find(|registration| {
+            let Some(first) = registrations.iter().find(|registration| {
                 registration.selector == dispatch.selector
                     && dispatch.values.contains(&registration.value)
             }) else {
                 continue;
             };
-            let Some(second) = self.registrations.iter().find(|registration| {
+            let Some(second) = registrations.iter().find(|registration| {
                 registration.selector == first.selector
                     && registration.name != first.name
                     && registration.value != first.value
@@ -177,17 +227,18 @@ fn path_def(cx: &LateContext<'_>, path: &QPath<'_>, id: HirId) -> Option<DefId> 
 fn effect_registration<'tcx>(
     cx: &LateContext<'tcx>,
     expr: &'tcx Expr<'tcx>,
-) -> Option<(&'tcx Expr<'tcx>, &'tcx Expr<'tcx>)> {
-    let (method, arguments) = match expr.kind {
+) -> Option<(&'tcx Expr<'tcx>, ty::Instance<'tcx>)> {
+    let (method, generics, arguments) = match expr.kind {
         ExprKind::MethodCall(_, _, arguments, _) => (
             typeck(cx, expr.hir_id).type_dependent_def_id(expr.hir_id)?,
+            typeck(cx, expr.hir_id).node_args(expr.hir_id),
             arguments,
         ),
         ExprKind::Call(callee, [_, arguments @ ..]) => {
-            let ty::FnDef(id, _) = typeck(cx, callee.hir_id).expr_ty(callee).kind() else {
+            let ty::FnDef(id, generics) = typeck(cx, callee.hir_id).expr_ty(callee).kind() else {
                 return None;
             };
-            (*id, arguments)
+            (*id, generics.skip_binder(), arguments)
         }
         _ => return None,
     };
@@ -206,6 +257,31 @@ fn effect_registration<'tcx>(
         }
         _ => return None,
     };
+    if definition(cx, owner, "StateTreeExt") != Some(owner) {
+        return None;
+    }
+    let input = definition(cx, owner, "StateTreeInput")?;
+    let constructor = cx
+        .tcx
+        .associated_items(input)
+        .in_definition_order()
+        .find(|item| item.name().as_str() == "from_state_tree_input")?
+        .def_id;
+    let message = generics.type_at(cx.tcx.generics_of(method).parent_count);
+    let input = ty::Instance::try_resolve(
+        cx.tcx,
+        cx.typing_env().with_post_analysis_normalized(cx.tcx),
+        constructor,
+        cx.tcx.mk_args(&[message.into()]),
+    )
+    .ok()??;
+    let [name] = arguments else {
+        return None;
+    };
+    Some((name, input))
+}
+
+fn definition(cx: &LateContext<'_>, owner: DefId, name: &str) -> Option<DefId> {
     if cx.tcx.crate_name(owner.krate).as_str() != "inslag_state_tree" {
         return None;
     }
@@ -218,15 +294,68 @@ fn effect_registration<'tcx>(
     } else {
         cx.tcx.module_children(root)
     };
-    if !children.iter().any(|child| {
-        child.ident.name.as_str() == "StateTreeExt" && child.res.opt_def_id() == Some(owner)
-    }) {
+    children
+        .iter()
+        .find_map(|child| (child.ident.name.as_str() == name).then(|| child.res.opt_def_id())?)
+}
+
+fn input_constructor<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) -> Option<DefId> {
+    let owner = cx.tcx.hir_enclosing_body_owner(expr.hir_id);
+    let item = cx
+        .tcx
+        .opt_associated_item(owner.to_def_id())?
+        .trait_item_def_id()?;
+    if cx.tcx.item_name(item).as_str() != "from_state_tree_input"
+        || definition(cx, item, "StateTreeInput") != Some(cx.tcx.parent(item))
+    {
         return None;
     }
-    let [name, constructor] = arguments else {
+    let body = cx.tcx.hir_body_owned_by(owner).value;
+    if peel(cx, body, 0).hir_id != expr.hir_id {
         return None;
+    }
+    // A routing expression that is discarded or bypassed by an early return
+    // does not prove which discriminator a registered effect will emit.
+    let mut returns = ExplicitReturns(false);
+    returns.visit_expr(body);
+    (!returns.0).then_some(owner.to_def_id())
+}
+
+fn effect_name<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) -> bool {
+    let expr = peel(cx, expr, 0);
+    let ExprKind::MethodCall(_, receiver, [], _) = expr.kind else {
+        return false;
     };
-    Some((name, constructor))
+    let Some(method) = typeck(cx, expr.hir_id).type_dependent_def_id(expr.hir_id) else {
+        return false;
+    };
+    let ty::Adt(adt, _) = expr_ty(cx, receiver).kind() else {
+        return false;
+    };
+    cx.tcx.item_name(method).as_str() == "effect_name"
+        && definition(cx, method, "StateTreeContext") == Some(adt.did())
+}
+
+fn effect_names(cx: &LateContext<'_>, pat: &Pat<'_>) -> Vec<Symbol> {
+    match pat.kind {
+        PatKind::TupleStruct(ref path, [inner], _)
+            if path_def(cx, path, pat.hir_id).and_then(|id| variant_id(cx, id))
+                == cx.tcx.lang_items().option_some_variant() =>
+        {
+            pattern_values(cx, inner)
+                .into_iter()
+                .filter_map(|value| match value {
+                    Value::String(name) => Some(name),
+                    _ => None,
+                })
+                .collect()
+        }
+        PatKind::Or(patterns) => patterns
+            .iter()
+            .flat_map(|pat| effect_names(cx, pat))
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn local_initializer<'tcx>(cx: &LateContext<'tcx>, id: HirId) -> Option<&'tcx Expr<'tcx>> {
@@ -354,11 +483,7 @@ fn constructor_output<'tcx>(
     cx: &LateContext<'tcx>,
     constructor: &'tcx Expr<'tcx>,
 ) -> Option<&'tcx Expr<'tcx>> {
-    let constructor = peel(cx, constructor, 0);
-    let ExprKind::Closure(closure) = constructor.kind else {
-        return None;
-    };
-    let body = cx.tcx.hir_body(closure.body).value;
+    let body = constructor;
     let mut returns = ExplicitReturns(false);
     returns.visit_expr(body);
     if returns.0 {
@@ -643,6 +768,10 @@ mod tests {
         custom_conversion,
         dynamic_selector,
         generic_messages,
+        generic_forwarding,
+        unregistered_variants,
+        discarded_inputs,
+        guarded_inputs,
         mutable_constructor,
         macro_return,
         labeled_break,

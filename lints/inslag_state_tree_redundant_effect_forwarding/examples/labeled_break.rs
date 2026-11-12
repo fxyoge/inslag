@@ -11,13 +11,26 @@ enum Command {
 
 fn configure(config: &mut World) {
     config
-        .add_state_tree_effect("arcade.start", |_, args| 'output: {
-            if args.take::<bool>("pause")? {
-                break 'output Ok(Command::Pause);
+        .add_state_tree_effect::<Command>("arcade.start")
+        .add_state_tree_effect::<Command>("arcade.pause");
+}
+
+impl state_tree::StateTreeInput for Command {
+    fn from_state_tree_input(
+        context: &state_tree::StateTreeContext<'_>,
+        args: &mut state_tree::StateTreeArgs,
+    ) -> Result<Self, state_tree::StateTreeEffectError> {
+        match context.effect_name() {
+            Some("arcade.start") => 'output: {
+                if args.take::<bool>("pause")? {
+                    break 'output Ok(Command::Pause);
+                }
+                Ok(Command::Start)
             }
-            Ok(Command::Start)
-        })
-        .add_state_tree_effect("arcade.pause", |_, _| Ok(Command::Pause));
+            Some("arcade.pause") => Ok(Command::Pause),
+            _ => unreachable!(),
+        }
+    }
 }
 
 fn consume(mut commands: MessageReader<Command>) {

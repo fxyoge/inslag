@@ -19,11 +19,24 @@ use messages::Command as Renamed;
 type Command = Renamed;
 
 fn configure(config: &mut Protocol) {
-    Registration::add_state_tree_effect(config, "arcade.start", |_, _| {
-        let command = Command::Start;
-        Ok(command)
-    });
-    Protocol::add_state_tree_effect(config, "arcade.pause", |_, _| Ok(Renamed::Pause));
+    Registration::add_state_tree_effect::<Command>(config, "arcade.start");
+    Protocol::add_state_tree_effect::<Renamed>(config, "arcade.pause");
+}
+
+impl state_tree::StateTreeInput for Command {
+    fn from_state_tree_input(
+        context: &state_tree::StateTreeContext<'_>,
+        _: &mut state_tree::StateTreeArgs,
+    ) -> Result<Self, state_tree::StateTreeEffectError> {
+        match context.effect_name() {
+            Some("arcade.start") => {
+                let command = Command::Start;
+                Ok(command)
+            }
+            Some("arcade.pause") => Ok(Renamed::Pause),
+            _ => unreachable!(),
+        }
+    }
 }
 
 fn consume(mut commands: MessageReader<Command>) {

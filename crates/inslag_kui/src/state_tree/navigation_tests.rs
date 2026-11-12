@@ -137,6 +137,25 @@ fn navigation_uses_authored_order_not_ids_and_wraps_both_directions() {
 }
 
 #[test]
+fn focus_and_activation_effects_have_independent_consumers() {
+    let (mut app, owner) = fixture(
+        r#"<node><button id="first" on-click="first"/><button id="second" on-click="second"/></node>"#,
+    );
+    input(&mut app, owner, "next");
+    assert_eq!(focused_name(&app), "first");
+    assert_eq!(number(&app, owner, "actions"), 0);
+
+    queue(&mut app, owner, "next");
+    queue(&mut app, owner, "activate");
+    app.update();
+    app.update();
+
+    assert_eq!(focused_name(&app), "second");
+    assert_eq!(received(&app, owner), "menu:second:nil");
+    assert_eq!(number(&app, owner, "actions"), 1);
+}
+
+#[test]
 fn focused_activation_and_pointer_share_current_value_and_availability() {
     let (mut app, owner) = fixture(
         r#"<node bind:disabled="disabled" bind:visible="shown"><button id="choice" on-click="choose" bind:value="value"/></node>"#,

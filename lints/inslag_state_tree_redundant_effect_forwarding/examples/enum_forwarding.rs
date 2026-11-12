@@ -4,25 +4,27 @@ use bevy_app::App;
 use bevy_ecs::prelude::*;
 use state_tree::StateTreeExt;
 
-#[derive(Message)]
+#[derive(Message, state_tree::StateTreeInput)]
 enum Command {
-    Start,
-    Pause,
+    #[state_tree(name = "arcade.start")]
+    Start {},
+    #[state_tree(name = "arcade.pause")]
+    Pause {},
 }
 
 fn consume(mut commands: MessageReader<Command>) {
     for command in commands.read() {
         match command {
-            Command::Start => {}
-            Command::Pause => {}
+            Command::Start {} => {}
+            Command::Pause {} => {}
         }
     }
 }
 
 fn configure(config: &mut App) {
     config
-        .add_state_tree_effect("arcade.start", |_, _| Ok(Command::Start))
-        .add_state_tree_effect("arcade.pause", |_, _| Ok(Command::Pause));
+        .add_state_tree_effect::<Command>("arcade.start")
+        .add_state_tree_effect::<Command>("arcade.pause");
 }
 
 fn main() {}

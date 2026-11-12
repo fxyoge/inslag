@@ -14,7 +14,14 @@ struct SetMode {
 }
 
 fn configure(config: &mut World) {
-    config.add_state_tree_effect("game.mode", |_, args| {
+    config.add_state_tree_effect::<SetMode>("game.mode");
+}
+
+impl state_tree::StateTreeInput for SetMode {
+    fn from_state_tree_input(
+        _: &state_tree::StateTreeContext<'_>,
+        args: &mut state_tree::StateTreeArgs,
+    ) -> Result<Self, state_tree::StateTreeEffectError> {
         Ok(SetMode {
             mode: if args.take::<bool>("sprint")? {
                 Mode::Sprint
@@ -22,7 +29,7 @@ fn configure(config: &mut World) {
                 Mode::Marathon
             },
         })
-    });
+    }
 }
 
 fn consume(mut commands: MessageReader<SetMode>) {

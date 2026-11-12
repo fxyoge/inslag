@@ -3,15 +3,15 @@
 use bevy_ecs::prelude::*;
 use state_tree::StateTreeExt;
 
-#[derive(Message)]
+#[derive(Message, state_tree::StateTreeInput)]
 struct Start;
-#[derive(Message)]
+#[derive(Message, state_tree::StateTreeInput)]
 struct Pause;
 
 fn configure(config: &mut World) {
     config
-        .add_state_tree_effect("arcade.start", |_, _| Ok(Start))
-        .add_state_tree_effect("arcade.pause", |_, _| Ok(Pause));
+        .add_state_tree_effect::<Start>("arcade.start")
+        .add_state_tree_effect::<Pause>("arcade.pause");
 }
 
 fn first_reader(mut messages: MessageReader<Start>) {
