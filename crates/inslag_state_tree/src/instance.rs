@@ -2220,6 +2220,7 @@ impl Execution<'_> {
             self.configuration.as_deref(),
             event_name,
             event_data,
+            self.now.as_secs_f64(),
         )
         .map_err(|error| RuntimeFault::Datamodel {
             operation,

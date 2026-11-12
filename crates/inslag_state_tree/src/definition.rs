@@ -2816,7 +2816,7 @@ pub(crate) fn is_luau_identifier(value: &str) -> bool {
 pub(crate) fn is_scxml_system_name(value: &str) -> bool {
     matches!(
         value,
-        "config" | "_event" | "_sessionid" | "_name" | "_ioprocessors" | "_x" | "In"
+        "config" | "_event" | "_time" | "_sessionid" | "_name" | "_ioprocessors" | "_x" | "In"
     )
 }
 
@@ -3710,7 +3710,7 @@ mod tests {
     #[test]
     fn rejects_luau_keywords_system_names_and_builtin_data_names() {
         for name in [
-            "if", "true", "_event", "_x", "In", "math", "type", "os", "rawget",
+            "if", "true", "_event", "_time", "_x", "In", "math", "type", "os", "rawget",
         ] {
             let mut builder = StateTreeBuilder::new("invalid-data");
             assert!(builder.luau_datamodel([StateTreeData::new(name)]).is_err());

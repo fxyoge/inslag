@@ -13,6 +13,8 @@ mod loader;
 #[cfg(test)]
 mod parity_tests;
 mod parse;
+#[cfg(test)]
+mod time_tests;
 
 pub(crate) use loader::ScxmlLoader;
 

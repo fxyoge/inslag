@@ -129,7 +129,9 @@ pub(crate) fn evaluate_with_configuration(
     configuration: Option<&LuauValue>,
     event_name: Option<&str>,
     event_data: Option<&LuauValue>,
+    time: f64,
 ) -> Result<LuauValue, Error> {
+    let time = LuauValue::Number(time);
     let event = event_name
         .filter(|_| {
             !expression.is_native() || expression.dependencies.iter().any(|root| root == "_event")
@@ -149,14 +151,19 @@ pub(crate) fn evaluate_with_configuration(
             values,
             Some(("config", configuration.unwrap_or(&empty)))
                 .into_iter()
-                .chain(event.as_ref().map(|event| ("_event", event))),
+                .chain(event.as_ref().map(|event| ("_event", event)))
+                .chain(Some(("_time", &time))),
         );
     }
     inslag_luau::evaluate(
         expression,
         names,
         values,
-        event.as_ref().map(|event| ("_event", event)),
+        event
+            .as_ref()
+            .map(|event| ("_event", event))
+            .into_iter()
+            .chain(Some(("_time", &time))),
     )
 }
 
