@@ -12,6 +12,7 @@
 mod data;
 mod editor;
 mod fixtures;
+mod plugins;
 mod preview;
 mod stories;
 
@@ -34,6 +35,7 @@ use bevy_flair::FlairPlugin;
 use data::{Binding, Data, Kind};
 use inslag_kui::{source as kui, state_tree::KuiStateTreePlugin};
 use inslag_state_tree::{LuauValue as KuiValue, StateTreeInstance, StateTreePlugin, StateTreeSet};
+use plugins::WorkbenchPlugin;
 
 /// Open a workbench for `.kui` files under `asset_root`.
 ///
@@ -113,62 +115,6 @@ fn configured_app(root: PathBuf, story_root: Option<PathBuf>) -> App {
     #[cfg(feature = "aseprite")]
     app.add_plugins(inslag_kui::aseprite::KuiAsepritePlugin);
     app
-}
-
-struct WorkbenchPlugin {
-    asset_root: PathBuf,
-    story_root: Option<PathBuf>,
-    memory: Dir,
-}
-
-impl WorkbenchPlugin {
-    fn new(asset_root: impl Into<PathBuf>) -> Self {
-        Self {
-            asset_root: asset_root.into(),
-            story_root: None,
-            memory: Dir::default(),
-        }
-    }
-}
-
-impl Plugin for WorkbenchPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins((fixtures::FixturePlugin, EnhancedInputPlugin))
-            .add_input_context::<editor::Editor>();
-        let mut tool = Workbench::new(self.asset_root.clone());
-        tool.story_root = self.story_root.clone();
-        tool.memory = self.memory.clone();
-        app.insert_resource(tool)
-            .add_systems(Startup, setup)
-            .add_systems(
-                Update,
-                (apply_actions, update)
-                    .chain()
-                    .in_set(StateTreeSet::HandleEffects),
-            )
-            .add_systems(
-                Update,
-                preview::attach.after(StateTreeSet::HandleActivities),
-            )
-            .add_systems(
-                PostUpdate,
-                preview::layout.after(bevy::ui::UiSystems::Layout),
-            )
-            .add_systems(
-                First,
-                preview::pointer.in_set(bevy::picking::PickingSystems::PostInput),
-            )
-            .add_systems(
-                PostUpdate,
-                editor::finish.after(bevy::text::EditableTextSystems),
-            )
-            .add_observer(editor::accept)
-            .add_observer(editor::commit)
-            .add_observer(editor::close)
-            .add_observer(editor::changed)
-            .add_observer(scroll)
-            .add_observer(resize_panes);
-    }
 }
 
 #[derive(Message, Clone, inslag_state_tree::StateTreeInput)]

@@ -3,6 +3,7 @@ members = [
     "bevy_enforce_inslag_audio",
     "bevy_enforce_bevy_enhanced_input",
     "bevy_indirect_system_registration",
+    "bevy_standard_plugin_filename",
     "bevy_component_without_producer",
     "bevy_unnecessary_mut_query",
     "bevy_unnecessary_query_read",

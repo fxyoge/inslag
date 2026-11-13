@@ -1,0 +1,147 @@
+warning: Bevy plugin type declaration must live in a file named `plugins.rs`
+  --> $SRC_DIR/examples/support/declarations.rs:1:12
+   |
+LL | pub struct MisplacedDeclaration;
+   |            ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+   = note: `#[warn(bevy_standard_plugin_filename)]` on by default
+
+warning: Bevy plugin implementation must live in a file named `plugins.rs`
+  --> $DIR/filenames.rs:20:1
+   |
+LL | / impl Installation for Misplaced {
+LL | |     fn build(&self, _: &mut App) {}
+LL | | }
+   | |_^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: Bevy plugin type declaration must live in a file named `plugins.rs`
+  --> $DIR/filenames.rs:18:8
+   |
+LL | struct Misplaced;
+   |        ^^^^^^^^^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: Bevy plugin implementation must live in a file named `plugins.rs`
+  --> $DIR/filenames.rs:28:1
+   |
+LL | / impl PluginGroup for MisplacedGroup {
+LL | |     fn build(self) -> PluginGroupBuilder {
+LL | |         PluginGroupBuilder::start::<Self>()
+LL | |     }
+LL | | }
+   | |_^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: Bevy plugin type declaration must live in a file named `plugins.rs`
+  --> $DIR/filenames.rs:24:6
+   |
+LL | enum MisplacedGroup {
+   |      ^^^^^^^^^^^^^^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: Bevy plugin implementation must live in a file named `plugins.rs`
+  --> $DIR/filenames.rs:34:1
+   |
+LL | / impl Installation for wiring::MisplacedImplementation {
+LL | |     fn build(&self, _: &mut App) {}
+LL | | }
+   | |_^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: Bevy plugin implementation must live in a file named `plugins.rs`
+  --> $DIR/filenames.rs:40:1
+   |
+LL | / impl Installation for Alias {
+LL | |     fn build(&self, _: &mut App) {}
+LL | | }
+   | |_^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: Bevy plugin type declaration must live in a file named `plugins.rs`
+  --> $SRC_DIR/examples/support/declarations.rs:2:12
+   |
+LL | pub struct Aliased;
+   |            ^^^^^^^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: Bevy plugin implementation must live in a file named `plugins.rs`
+  --> $DIR/filenames.rs:46:1
+   |
+LL | / impl<T: Send + Sync + 'static> Installation for Generic<T> {
+LL | |     fn build(&self, _: &mut App) {}
+LL | | }
+   | |_^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: Bevy plugin type declaration must live in a file named `plugins.rs`
+  --> $DIR/filenames.rs:44:8
+   |
+LL | struct Generic<T>(std::marker::PhantomData<T>);
+   |        ^^^^^^^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: Bevy plugin implementation must live in a file named `plugins.rs`
+  --> $DIR/filenames.rs:50:1
+   |
+LL | / bevy_app::plugin_group! {
+LL | |     struct GeneratedGroup {}
+LL | | }
+   | |_^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: Bevy plugin type declaration must live in a file named `plugins.rs`
+  --> $DIR/filenames.rs:51:12
+   |
+LL |     struct GeneratedGroup {}
+   |            ^^^^^^^^^^^^^^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: Bevy plugin implementation must live in a file named `plugins.rs`
+  --> $DIR/filenames.rs:63:1
+   |
+LL | plugin!(Generated);
+   | ^^^^^^^^^^^^^^^^^^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: Bevy plugin type declaration must live in a file named `plugins.rs`
+  --> $DIR/filenames.rs:63:9
+   |
+LL | plugin!(Generated);
+   |         ^^^^^^^^^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: Bevy plugin implementation must live in a file named `plugins.rs`
+  --> $DIR/filenames.rs:70:5
+   |
+LL | /     impl Installation for Inline {
+LL | |         fn build(&self, _: &mut App) {}
+LL | |     }
+   | |_____^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: Bevy plugin type declaration must live in a file named `plugins.rs`
+  --> $DIR/filenames.rs:68:12
+   |
+LL |     struct Inline;
+   |            ^^^^^^
+   |
+   = help: move it into the owning feature's `plugins.rs` and re-export the plugin where needed
+
+warning: 16 warnings emitted
+

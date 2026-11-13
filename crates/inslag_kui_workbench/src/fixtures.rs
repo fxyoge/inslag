@@ -1,3 +1,6 @@
+mod plugins;
+pub(crate) use plugins::FixturePlugin;
+
 use std::path::Path;
 
 use bevy::{
@@ -70,15 +73,6 @@ impl StateTreeEvent for FixtureChanged {
     }
 }
 impl EntityStateTreeEvent for FixtureChanged {}
-
-pub(crate) struct FixturePlugin;
-
-impl Plugin for FixturePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_state_tree_event::<FixtureChanged>()
-            .add_state_tree_effect::<ToolAction>("workbench.command");
-    }
-}
 
 pub(crate) fn install(
     world: &mut World,

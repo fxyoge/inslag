@@ -81,13 +81,11 @@ mod runtime;
 mod state_tree;
 
 pub use mixer::{AudioMixer, MixerError};
+pub use runtime::EnhancedAudioPlugin;
 
 use std::time::Duration;
 
-use bevy_ecs::{
-    prelude::*,
-    schedule::{InternedScheduleLabel, ScheduleLabel},
-};
+use bevy_ecs::prelude::*;
 
 /// Configure voice budgets, source caching, and playback timeouts.
 #[derive(Resource, Clone, Debug)]
@@ -135,18 +133,4 @@ pub struct AudioDiagnostic {
 pub enum EnhancedAudioSet {
     Collect,
     Playback,
-}
-
-/// Register SCXML audio effects, activities, and mixer resources.
-pub struct EnhancedAudioPlugin {
-    schedule: InternedScheduleLabel,
-}
-
-impl EnhancedAudioPlugin {
-    /// Use the schedule passed to `StateTreePlugin::new`.
-    pub fn new(schedule: impl ScheduleLabel) -> Self {
-        Self {
-            schedule: schedule.intern(),
-        }
-    }
 }

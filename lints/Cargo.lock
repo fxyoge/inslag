@@ -651,6 +651,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_standard_plugin_filename"
+version = "0.1.0"
+dependencies = [
+ "bevy_app",
+ "dylint_linting",
+ "dylint_testing",
+]
+
+[[package]]
 name = "bevy_tasks"
 version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

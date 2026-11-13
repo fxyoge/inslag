@@ -1,3 +1,6 @@
+mod plugins;
+pub use plugins::EnhancedAudioPlugin;
+
 use std::{collections::HashMap, io::Cursor, sync::Arc, time::Duration};
 
 use bevy_app::{App, Plugin};
@@ -14,52 +17,11 @@ use inslag_state_tree::{
 };
 
 use crate::{
-    AudioDiagnostic, AudioMixer, AudioSettings, EnhancedAudioPlugin, EnhancedAudioSet,
+    AudioDiagnostic, AudioMixer, AudioSettings, EnhancedAudioSet,
     state_tree::{BusGain, Play, Playback, Sound},
 };
 
 type Token = StateTreeActivityToken<Playback>;
-
-impl Plugin for EnhancedAudioPlugin {
-    fn build(&self, app: &mut App) {
-        assert!(
-            app.is_plugin_added::<StateTreePlugin>(),
-            "install StateTreePlugin before EnhancedAudioPlugin"
-        );
-        assert!(
-            app.is_plugin_added::<AudioPlugin>(),
-            "install Bevy's AudioPlugin before EnhancedAudioPlugin"
-        );
-        assert!(app.world().contains_resource::<AssetServer>());
-        assert!(
-            app.world().contains_resource::<Assets<AudioSource>>(),
-            "enable at least one audio format"
-        );
-        assert!(app.world().contains_resource::<Time>());
-        let schedule = self.schedule;
-        app.add_state_tree_effect::<Play>("audio.play")
-            .add_state_tree_activity::<Playback>("audio.playback")
-            .add_state_tree_effect::<BusGain>("audio.set_bus_gain");
-        app.init_resource::<AudioSettings>()
-            .init_resource::<AudioMixer>()
-            .init_resource::<Runtime>()
-            .add_message::<AudioDiagnostic>()
-            .configure_sets(
-                schedule,
-                (
-                    EnhancedAudioSet::Collect.in_set(StateTreeSet::HandleEffects),
-                    EnhancedAudioSet::Playback.after(StateTreeSet::HandleEffects),
-                )
-                    .chain(),
-            )
-            .add_systems(
-                schedule,
-                collect_activities.in_set(StateTreeSet::HandleActivities),
-            )
-            .add_systems(schedule, collect_effects.in_set(EnhancedAudioSet::Collect))
-            .add_systems(schedule, advance.in_set(EnhancedAudioSet::Playback));
-    }
-}
 
 struct Request {
     owner: Entity,
