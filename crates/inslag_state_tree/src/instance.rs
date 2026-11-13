@@ -1138,6 +1138,10 @@ impl Execution<'_> {
         if !self.is_state_active(definition.owner) {
             return false;
         }
+        activities.finish(
+            self.linked.unwrap().activity(outcome.token.activity),
+            outcome.token,
+        );
         let success = matches!(outcome.kind, crate::activity::ActivityOutcomeKind::Complete);
         let event = if success {
             definition.done

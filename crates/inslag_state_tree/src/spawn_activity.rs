@@ -53,7 +53,7 @@ struct SpawnRuns {
 pub(crate) fn register(app: &mut App, schedule: InternedScheduleLabel) {
     crate::activity::register_activity::<SpawnActivity>(
         app.world_mut(),
-        NAME.into(),
+        crate::Activity::new(NAME).with_lifecycle(),
         crate::protocol::RegistrationOrigin::BuiltIn,
     );
     app.init_resource::<SpawnRuns>().add_systems(
@@ -694,6 +694,6 @@ mod tests {
             AssetPlugin::default(),
             crate::StateTreePlugin::new(Update),
         ));
-        app.add_state_tree_activity::<SpawnActivity>(NAME);
+        app.add_state_tree_activity(crate::Activity::<SpawnActivity>::new(NAME).with_lifecycle());
     }
 }

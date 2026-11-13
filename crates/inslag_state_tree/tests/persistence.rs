@@ -125,7 +125,7 @@ fn data(app: &App, entity: Entity, name: &str) -> Option<LuauValue> {
 fn configure(config: &mut App) {
     config
         .add_state_tree_event::<Advance>()
-        .add_state_tree_activity::<Work>("work");
+        .add_state_tree_activity(inslag_state_tree::Activity::<Work>::new("work").with_lifecycle());
 }
 fn configuration(extra: i64) -> StateTreeConfiguration {
     StateTreeConfiguration::new([("extra".into(), LuauValue::Integer(extra))])

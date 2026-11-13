@@ -15,7 +15,9 @@ impl Plugin for KuiStateTreePlugin {
         app.add_state_tree_event::<UiAction>()
             .add_state_tree_event::<UiReady>()
             .add_state_tree_event::<UiFocusChanged>()
-            .add_state_tree_activity::<UiRender>("ui.render")
+            .add_state_tree_activity(
+                inslag_state_tree::Activity::<UiRender>::new("ui.render").with_lifecycle(),
+            )
             .add_state_tree_effect::<FocusView>("ui.focus")
             .add_state_tree_effect::<ActivateView>("ui.activate")
             .init_resource::<ViewIndex>();

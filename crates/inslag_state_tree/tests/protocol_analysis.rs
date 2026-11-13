@@ -78,8 +78,12 @@ fn configure(config: &mut App) {
         .add_state_tree_event::<UnusedEvent>()
         .add_state_tree_effect::<EffectMessage>("used.effect")
         .add_state_tree_effect::<EffectMessage>("unused.effect")
-        .add_state_tree_activity::<TestActivity>("used.activity")
-        .add_state_tree_activity::<TestActivity>("unused.activity");
+        .add_state_tree_activity(inslag_state_tree::Activity::<TestActivity>::new(
+            "used.activity",
+        ))
+        .add_state_tree_activity(inslag_state_tree::Activity::<TestActivity>::new(
+            "unused.activity",
+        ));
 }
 
 #[test]

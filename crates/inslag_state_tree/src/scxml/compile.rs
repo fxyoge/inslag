@@ -1313,8 +1313,8 @@ mod tests {
     fn configure_no_events(config: &mut bevy_app::App) {
         config
             .add_state_tree_effect::<RecordedEffect>("record")
-            .add_state_tree_activity::<Work>("work")
-            .add_state_tree_activity::<Work>("find_path");
+            .add_state_tree_activity(crate::Activity::<Work>::new("work").with_lifecycle())
+            .add_state_tree_activity(crate::Activity::<Work>::new("find_path").with_lifecycle());
     }
 
     #[derive(Message, crate::StateTreeInput)]
@@ -2092,7 +2092,7 @@ mod tests {
     fn configure_reenter(config: &mut bevy_app::App) {
         config
             .add_state_tree_event::<ReenterEvent>()
-            .add_state_tree_activity::<Work>("work");
+            .add_state_tree_activity(crate::Activity::<Work>::new("work").with_lifecycle());
     }
 
     #[derive(bevy_ecs::event::Event, crate::StateTreeEvent)]

@@ -1853,7 +1853,7 @@ mod tests {
             .add_state_tree_event::<Reset>()
             .add_state_tree_event::<ResetAll>()
             .add_state_tree_event::<AdvanceAll>()
-            .add_state_tree_activity::<FindPath>("find_path")
+            .add_state_tree_activity(crate::Activity::<FindPath>::new("find_path").with_lifecycle())
             .add_state_tree_effect::<EffectPublished>("publish");
     }
 

@@ -87,7 +87,9 @@ const REQUIRED: &str = r#"
 #[test]
 fn decodes_required_defaulted_renamed_nested_and_enum_values() {
     let mut app = app();
-    app.add_state_tree_activity::<Request>("request");
+    app.add_state_tree_activity(
+        inslag_state_tree::Activity::<Request>::new("request").with_lifecycle(),
+    );
     let owner = spawn(&mut app, "request", REQUIRED);
     app.update();
     let (token, request) = started::<Request>(&mut app).pop().unwrap();
@@ -122,7 +124,9 @@ fn decodes_required_defaulted_renamed_nested_and_enum_values() {
 #[test]
 fn omitted_and_nil_optional_fields_are_equivalent() {
     let mut app = app();
-    app.add_state_tree_activity::<Request>("request");
+    app.add_state_tree_activity(
+        inslag_state_tree::Activity::<Request>::new("request").with_lifecycle(),
+    );
     spawn(&mut app, "request", REQUIRED);
     spawn(
         &mut app,
@@ -164,7 +168,9 @@ fn invalid_arguments_fault_before_publishing_a_start() {
         ),
     ] {
         let mut app = app();
-        app.add_state_tree_activity::<Request>("request");
+        app.add_state_tree_activity(
+            inslag_state_tree::Activity::<Request>::new("request").with_lifecycle(),
+        );
         let owner = spawn(&mut app, "request", &arguments);
         app.update();
         let status = app
@@ -199,7 +205,9 @@ impl<D: 'static> StateTreeActivity for ContextRequest<D> {
 fn context_injection_and_generic_markers_need_no_consumer_parser() {
     struct Domain;
     let mut app = app();
-    app.add_state_tree_activity::<ContextRequest<Domain>>("context");
+    app.add_state_tree_activity(
+        inslag_state_tree::Activity::<ContextRequest<Domain>>::new("context").with_lifecycle(),
+    );
     let other = app.world_mut().spawn_empty().id();
     let owner = spawn(&mut app, "context", "");
     let overridden = spawn(
@@ -235,9 +243,12 @@ impl StateTreeActivity for Converted {
 #[test]
 fn decoded_activities_start_without_domain_admission_checks() {
     let mut app = app();
-    app.add_state_tree_activity::<Converted>("canonical");
-    app.world_mut()
-        .add_state_tree_activity::<Converted>("alternate");
+    app.add_state_tree_activity(
+        inslag_state_tree::Activity::<Converted>::new("canonical").with_lifecycle(),
+    );
+    app.world_mut().add_state_tree_activity(
+        inslag_state_tree::Activity::<Converted>::new("alternate").with_lifecycle(),
+    );
     let canonical = spawn(
         &mut app,
         "canonical",

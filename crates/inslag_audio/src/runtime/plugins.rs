@@ -33,7 +33,9 @@ impl Plugin for EnhancedAudioPlugin {
         assert!(app.world().contains_resource::<Time>());
         let schedule = self.schedule;
         app.add_state_tree_effect::<Play>("audio.play")
-            .add_state_tree_activity::<Playback>("audio.playback")
+            .add_state_tree_activity(
+                inslag_state_tree::Activity::<Playback>::new("audio.playback").with_lifecycle(),
+            )
             .add_state_tree_effect::<BusGain>("audio.set_bus_gain");
         app.init_resource::<AudioSettings>()
             .init_resource::<AudioMixer>()

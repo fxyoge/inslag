@@ -44,7 +44,7 @@ fn configure(config: &mut App) {
         .add_state_tree_event::<Capture>()
         .add_state_tree_event::<Restart>()
         .add_state_tree_event::<Notified>()
-        .add_state_tree_activity::<Work>("work")
+        .add_state_tree_activity(inslag_state_tree::Activity::<Work>::new("work").with_lifecycle())
         .add_state_tree_effect::<Captured>("capture");
 }
 

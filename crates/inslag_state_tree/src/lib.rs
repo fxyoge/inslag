@@ -99,8 +99,11 @@
 //! in [`StateTreeSet::HandleEffects`].
 //!
 //! For work that lasts until a state exits, register a [`StateTreeActivity`] with
-//! [`add_state_tree_activity`](StateTreeExt::add_state_tree_activity) and use
-//! `<ist:activity id="..." name="..."/>`. Handle its start and cancellation in
+//! [`add_state_tree_activity`](StateTreeExt::add_state_tree_activity) using
+//! [`Activity::new`] and use `<ist:activity id="..." name="..."/>`.
+//! Add markers or a run collection with [`Activity::with_marker`] and
+//! [`Activity::with_collection`]. For custom systems, enable
+//! [`Activity::with_lifecycle`] and read lifecycle messages in
 //! [`StateTreeSet::HandleActivities`].
 //!
 //! # Save tree data
@@ -172,23 +175,23 @@ pub use trace::{StateTreeEventLog, StateTreeTraceLog, StateTreeTracePlugin};
 /// Common state-tree imports.
 pub mod prelude {
     pub use crate::{
-        BroadcastStateTreeEvent, BroadcastStateTreeEventWriter, BuildError, DatamodelOperation,
-        EntityStateTreeEvent, EntityStateTreeEventWriter, FromStateTreeValue, HistoryId,
-        InstanceStatus, LuauValue, PersistStateTree, RuntimeFault, StateId, StateTreeAction,
-        StateTreeActivity, StateTreeActivityArgs, StateTreeActivityContext,
-        StateTreeActivityDefinition, StateTreeActivityError, StateTreeActivityLifecycle,
-        StateTreeActivityOutcomeWriter, StateTreeActivityToken, StateTreeArgs, StateTreeArgument,
-        StateTreeBinding, StateTreeBindingSet, StateTreeBuilder, StateTreeConfiguration,
-        StateTreeContext, StateTreeData, StateTreeDataOverrideError, StateTreeDataOverrides,
-        StateTreeDefinition, StateTreeEffectArgs, StateTreeEffectArgument, StateTreeEffectContext,
-        StateTreeEffectError, StateTreeEvent, StateTreeEventLog, StateTreeEventRef, StateTreeExt,
-        StateTreeInput, StateTreeInstance, StateTreeLinkError, StateTreeLinkFailure,
-        StateTreeLinkIssue, StateTreePlugin, StateTreeProtocolInventory, StateTreeSet,
-        StateTreeSettings, StateTreeTarget, StateTreeTraceLog, StateTreeTracePlugin,
-        StateTreeTransition,
+        Activity, ActivityCollectionRetention, ActivityRun, ActivityRuns, BroadcastStateTreeEvent,
+        BroadcastStateTreeEventWriter, BuildError, DatamodelOperation, EntityStateTreeEvent,
+        EntityStateTreeEventWriter, FromStateTreeValue, HistoryId, InstanceStatus, LuauValue,
+        PersistStateTree, RuntimeFault, StateId, StateTreeAction, StateTreeActivity,
+        StateTreeActivityArgs, StateTreeActivityContext, StateTreeActivityDefinition,
+        StateTreeActivityError, StateTreeActivityLifecycle, StateTreeActivityOutcomeWriter,
+        StateTreeActivityToken, StateTreeArgs, StateTreeArgument, StateTreeBinding,
+        StateTreeBindingSet, StateTreeBuilder, StateTreeConfiguration, StateTreeContext,
+        StateTreeData, StateTreeDataOverrideError, StateTreeDataOverrides, StateTreeDefinition,
+        StateTreeEffectArgs, StateTreeEffectArgument, StateTreeEffectContext, StateTreeEffectError,
+        StateTreeEvent, StateTreeEventLog, StateTreeEventRef, StateTreeExt, StateTreeInput,
+        StateTreeInstance, StateTreeLinkError, StateTreeLinkFailure, StateTreeLinkIssue,
+        StateTreePlugin, StateTreeProtocolInventory, StateTreeSet, StateTreeSettings,
+        StateTreeTarget, StateTreeTraceLog, StateTreeTracePlugin, StateTreeTransition,
     };
 }
 pub use activity::{
-    StateTreeActivity, StateTreeActivityLifecycle, StateTreeActivityOutcomeWriter,
-    StateTreeActivityToken,
+    Activity, ActivityCollectionRetention, ActivityRun, ActivityRuns, StateTreeActivity,
+    StateTreeActivityLifecycle, StateTreeActivityOutcomeWriter, StateTreeActivityToken,
 };

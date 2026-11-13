@@ -110,7 +110,9 @@ fn app_with_schedule(schedule: impl ScheduleLabel) -> App {
     })
     .add_message::<AudioDiagnostic>()
     .add_state_tree_effect::<Play>("audio.play")
-    .add_state_tree_activity::<Playback>("audio.playback")
+    .add_state_tree_activity(
+        inslag_state_tree::Activity::<Playback>::new("audio.playback").with_lifecycle(),
+    )
     .add_state_tree_effect::<BusGain>("audio.set_bus_gain")
     .add_systems(
         schedule,

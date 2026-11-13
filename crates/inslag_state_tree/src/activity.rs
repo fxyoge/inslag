@@ -13,8 +13,14 @@ use bevy_ecs::{
     message::Message,
     prelude::{Component, Query, Res, Resource},
     system::{ParallelCommands, SystemParam},
-    world::DeferredWorld,
+    world::{DeferredWorld, World},
 };
+
+mod registration;
+mod runs;
+
+pub use registration::{Activity, ActivityCollectionRetention};
+pub use runs::{ActivityRun, ActivityRuns};
 
 use crate::{
     LuauValue, StateTreeActivityArgs, StateTreeEffectContext, StateTreeEffectError, StateTreeInput,
@@ -136,12 +142,14 @@ pub(crate) trait RegisteredActivity: Send + Sync {
         commands: &ParallelCommands<'_, '_>,
     ) -> Result<(), StateTreeEffectError>;
     fn cancel(&self, token: ErasedActivityToken, commands: &ParallelCommands<'_, '_>);
+    fn finish(&self, token: ErasedActivityToken, commands: &ParallelCommands<'_, '_>);
     fn cancel_deferred(&self, token: ErasedActivityToken, world: &mut DeferredWorld<'_>);
 }
 
 pub(crate) trait RuntimeActivitySink {
     fn start(&mut self, request: RuntimeActivityStart<'_>) -> Result<(), StateTreeEffectError>;
     fn cancel(&mut self, handler: &Arc<dyn RegisteredActivity>, token: ErasedActivityToken);
+    fn finish(&mut self, handler: &Arc<dyn RegisteredActivity>, token: ErasedActivityToken);
 }
 
 pub(crate) struct RuntimeActivityStart<'a> {
@@ -167,6 +175,10 @@ impl RuntimeActivitySink for BevyActivitySink<'_, '_, '_> {
     fn cancel(&mut self, handler: &Arc<dyn RegisteredActivity>, token: ErasedActivityToken) {
         handler.cancel(token, self.commands);
     }
+
+    fn finish(&mut self, handler: &Arc<dyn RegisteredActivity>, token: ErasedActivityToken) {
+        handler.finish(token, self.commands);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -190,7 +202,32 @@ impl ErasedActivityToken {
 }
 
 struct TypedActivity<A> {
-    marker: PhantomData<fn() -> A>,
+    markers: Arc<[registration::MarkerBinding]>,
+    collection: bool,
+    retention: ActivityCollectionRetention,
+    clone_activity: Option<fn(&A) -> A>,
+    lifecycle: bool,
+}
+
+impl<A: StateTreeActivity> TypedActivity<A> {
+    fn enqueue_stop(
+        &self,
+        token: ErasedActivityToken,
+        commands: &ParallelCommands<'_, '_>,
+        lifecycle: bool,
+    ) {
+        if self.markers.is_empty() && !self.collection && !lifecycle {
+            return;
+        }
+        let markers = Arc::clone(&self.markers);
+        let collection = self.collection;
+        let retention = self.retention;
+        commands.command_scope(move |mut commands| {
+            commands.queue(move |world: &mut World| {
+                stop::<A>(world, token, &markers, collection, retention, lifecycle);
+            });
+        });
+    }
 }
 
 impl<A> RegisteredActivity for TypedActivity<A>
@@ -202,6 +239,9 @@ where
     }
     #[cfg(feature = "persistence")]
     fn discard_pending_starts(&self, world: &mut bevy_ecs::world::World) {
+        if !self.lifecycle {
+            return;
+        }
         world.resource_scope(
             |world,
              mut messages: bevy_ecs::prelude::Mut<
@@ -234,29 +274,92 @@ where
     ) -> Result<(), StateTreeEffectError> {
         let activity = A::from_state_tree_input(&context, &mut arguments)?;
         arguments.finish()?;
+        if self.markers.is_empty() && !self.collection && !self.lifecycle {
+            return Ok(());
+        }
+        let markers = Arc::clone(&self.markers);
+        let collection = self.collection;
+        let clone_activity = self.clone_activity;
+        let lifecycle = self.lifecycle;
         commands.command_scope(move |mut commands| {
-            commands.write_message(StateTreeActivityLifecycle::<A>::Started {
-                token: token.typed(),
-                activity,
+            commands.queue(move |world: &mut World| {
+                let active = world
+                    .get::<StateTreeInstance>(token.entity)
+                    .is_some_and(|instance| instance.accepts_activity_token(token));
+                if active {
+                    for marker in markers.iter() {
+                        (marker.start)(world, token);
+                    }
+                }
+                if lifecycle {
+                    if collection && active {
+                        world.write_message(StateTreeActivityLifecycle::<A>::Started {
+                            token: token.typed(),
+                            activity: clone_activity.expect("collection installs cloning")(
+                                &activity,
+                            ),
+                        });
+                    } else {
+                        world.write_message(StateTreeActivityLifecycle::<A>::Started {
+                            token: token.typed(),
+                            activity,
+                        });
+                        return;
+                    }
+                }
+                if collection && active {
+                    runs::insert(world, token, activity);
+                }
             });
         });
         Ok(())
     }
 
     fn cancel(&self, token: ErasedActivityToken, commands: &ParallelCommands<'_, '_>) {
-        commands.command_scope(move |mut commands| {
-            commands.write_message(StateTreeActivityLifecycle::<A>::Cancelled {
-                token: token.typed(),
-            });
-        });
+        self.enqueue_stop(token, commands, self.lifecycle);
+    }
+
+    fn finish(&self, token: ErasedActivityToken, commands: &ParallelCommands<'_, '_>) {
+        self.enqueue_stop(token, commands, false);
     }
 
     fn cancel_deferred(&self, token: ErasedActivityToken, world: &mut DeferredWorld<'_>) {
+        if self.markers.is_empty() && !self.collection && !self.lifecycle {
+            return;
+        }
+        let markers = Arc::clone(&self.markers);
+        let collection = self.collection;
+        let retention = self.retention;
+        let lifecycle = self.lifecycle;
+        world.commands().queue(move |world: &mut World| {
+            stop::<A>(world, token, &markers, collection, retention, lifecycle);
+        });
+    }
+}
+
+fn stop<A: StateTreeActivity>(
+    world: &mut World,
+    token: ErasedActivityToken,
+    markers: &[registration::MarkerBinding],
+    collection: bool,
+    retention: ActivityCollectionRetention,
+    lifecycle: bool,
+) {
+    for marker in markers {
+        (marker.stop)(world, token);
+    }
+    if collection {
+        runs::remove::<A>(world, token, retention);
+    }
+    if lifecycle {
         world.write_message(StateTreeActivityLifecycle::<A>::Cancelled {
             token: token.typed(),
         });
     }
 }
+
+#[derive(Resource, Default)]
+struct CollectionSettings(HashMap<std::any::TypeId, ActivityCollectionRetention>);
 
 #[derive(Resource, Default)]
 pub(crate) struct StateTreeActivityRegistry {
@@ -385,11 +488,19 @@ impl<A: StateTreeActivity> StateTreeActivityOutcomeWriter<'_, '_, A> {
 
 pub(crate) fn register_activity<A>(
     world: &mut bevy_ecs::world::World,
-    name: Box<str>,
+    activity: Activity<A>,
     origin: RegistrationOrigin,
 ) where
     A: StateTreeActivity + StateTreeInput,
 {
+    let Activity {
+        name,
+        markers,
+        collection,
+        retention,
+        clone_activity,
+        lifecycle,
+    } = activity;
     assert!(
         !name.is_empty(),
         "state-tree activity names cannot be empty"
@@ -398,14 +509,31 @@ pub(crate) fn register_activity<A>(
     if registry.activities.contains_key(&name) {
         panic!("state-tree activity `{name}` was registered more than once");
     }
-    crate::app::add_message::<StateTreeActivityLifecycle<A>>(world);
+    if collection {
+        let mut settings = world.get_resource_or_init::<CollectionSettings>();
+        let previous = settings
+            .0
+            .entry(std::any::TypeId::of::<A>())
+            .or_insert(retention);
+        assert_eq!(
+            *previous, retention,
+            "activity collections of the same type must use the same retention policy"
+        );
+    }
+    if lifecycle {
+        crate::app::add_message::<StateTreeActivityLifecycle<A>>(world);
+    }
     world
         .resource_mut::<StateTreeActivityRegistry>()
         .activities
         .insert(
             name.clone(),
             Arc::new(TypedActivity::<A> {
-                marker: PhantomData,
+                markers: markers.into(),
+                collection,
+                retention,
+                clone_activity,
+                lifecycle,
             }),
         );
     world
@@ -430,7 +558,7 @@ mod tests {
         let mut world = bevy_ecs::world::World::new();
         register_activity::<TestActivity>(
             &mut world,
-            "ist.spawn".into(),
+            Activity::new("ist.spawn"),
             RegistrationOrigin::Application,
         );
         assert!(
@@ -447,13 +575,69 @@ mod tests {
         let mut world = bevy_ecs::world::World::new();
         register_activity::<TestActivity>(
             &mut world,
-            "duplicate".into(),
+            Activity::new("duplicate"),
             RegistrationOrigin::Application,
         );
         register_activity::<TestActivity>(
             &mut world,
-            "duplicate".into(),
+            Activity::new("duplicate"),
             RegistrationOrigin::Application,
+        );
+    }
+
+    #[test]
+    fn repeated_old_cleanup_cannot_remove_new_bindings() {
+        #[derive(bevy_ecs::prelude::Component, Default)]
+        struct Marker;
+
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        let old = ErasedActivityToken {
+            entity,
+            runtime_id: 1,
+            activity: ActivityId(0),
+            generation: 1,
+        };
+        let new = ErasedActivityToken {
+            generation: 2,
+            ..old
+        };
+        let activity = Activity::<TestActivity>::new("test").with_marker::<Marker>();
+        let marker = activity.markers[0];
+        (marker.start)(&mut world, old);
+        runs::insert(&mut world, old, TestActivity);
+        stop::<TestActivity>(
+            &mut world,
+            old,
+            &activity.markers,
+            true,
+            ActivityCollectionRetention::RemoveWhenEmpty,
+            false,
+        );
+        (marker.start)(&mut world, new);
+        runs::insert(&mut world, new, TestActivity);
+        stop::<TestActivity>(
+            &mut world,
+            old,
+            &activity.markers,
+            true,
+            ActivityCollectionRetention::RemoveWhenEmpty,
+            false,
+        );
+        assert!(world.get::<Marker>(entity).is_some());
+        assert_eq!(
+            world
+                .get::<ActivityRuns<TestActivity>>(entity)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            world
+                .get::<ActivityRuns<TestActivity>>(entity)
+                .unwrap()
+                .get(new.typed())
+                .is_some()
         );
     }
 }

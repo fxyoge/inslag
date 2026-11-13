@@ -191,7 +191,7 @@ where
             );
             crate::activity::register_activity::<GlobalBindingActivity<B>>(
                 world,
-                name,
+                crate::Activity::new(name).with_lifecycle(),
                 crate::protocol::RegistrationOrigin::Application,
             );
         }));

@@ -34,7 +34,9 @@ fn configure_simulation(config: &mut App) {
         .add_state_tree_event::<EntityTick>()
         .add_state_tree_event::<Ignored>()
         .add_state_tree_effect::<BenchmarkEffect>("benchmark")
-        .add_state_tree_activity::<BenchmarkActivity>("benchmark");
+        .add_state_tree_activity(
+            inslag_state_tree::Activity::<BenchmarkActivity>::new("benchmark").with_lifecycle(),
+        );
 }
 
 #[derive(Event, StateTreeEvent)]

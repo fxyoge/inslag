@@ -6,7 +6,7 @@ use bevy_ecs::{
 };
 
 use crate::{
-    StateTreeActivity, StateTreeBinding, StateTreeEvent, StateTreeInput,
+    Activity, StateTreeActivity, StateTreeBinding, StateTreeEvent, StateTreeInput,
     protocol::RegistrationOrigin,
 };
 
@@ -19,7 +19,7 @@ pub trait StateTreeExt {
     ) -> &mut Self;
     fn add_state_tree_activity<A: StateTreeActivity + StateTreeInput>(
         &mut self,
-        name: impl Into<Box<str>>,
+        activity: Activity<A>,
     ) -> &mut Self;
     fn add_state_tree_global_binding<B, S, M>(
         &mut self,
@@ -52,9 +52,9 @@ impl StateTreeExt for World {
 
     fn add_state_tree_activity<A: StateTreeActivity + StateTreeInput>(
         &mut self,
-        name: impl Into<Box<str>>,
+        activity: Activity<A>,
     ) -> &mut Self {
-        crate::activity::register_activity::<A>(self, name.into(), RegistrationOrigin::Application);
+        crate::activity::register_activity(self, activity, RegistrationOrigin::Application);
         self
     }
 
@@ -93,9 +93,9 @@ impl StateTreeExt for App {
 
     fn add_state_tree_activity<A: StateTreeActivity + StateTreeInput>(
         &mut self,
-        name: impl Into<Box<str>>,
+        activity: Activity<A>,
     ) -> &mut Self {
-        self.world_mut().add_state_tree_activity::<A>(name);
+        self.world_mut().add_state_tree_activity(activity);
         self
     }
 
