@@ -129,9 +129,10 @@ pub(crate) fn evaluate_with_configuration(
     configuration: Option<&LuauValue>,
     event_name: Option<&str>,
     event_data: Option<&LuauValue>,
-    time: f64,
+    time: crate::time::TimeSample,
 ) -> Result<LuauValue, Error> {
-    let time = LuauValue::Number(time);
+    let session_time = LuauValue::Number(time.session.as_secs_f64());
+    let time = LuauValue::Number(time.game.as_secs_f64());
     let event = event_name
         .filter(|_| {
             !expression.is_native() || expression.dependencies.iter().any(|root| root == "_event")
@@ -152,7 +153,7 @@ pub(crate) fn evaluate_with_configuration(
             Some(("config", configuration.unwrap_or(&empty)))
                 .into_iter()
                 .chain(event.as_ref().map(|event| ("_event", event)))
-                .chain(Some(("_time", &time))),
+                .chain([("_time", &time), ("_session_time", &session_time)]),
         );
     }
     inslag_luau::evaluate(
@@ -163,7 +164,7 @@ pub(crate) fn evaluate_with_configuration(
             .as_ref()
             .map(|event| ("_event", event))
             .into_iter()
-            .chain(Some(("_time", &time))),
+            .chain([("_time", &time), ("_session_time", &session_time)]),
     )
 }
 

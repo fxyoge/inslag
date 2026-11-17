@@ -45,6 +45,8 @@ fn time_is_sampled_only_when_the_chart_runs_in_native_and_vm_expressions() {
             <data id="native" expr="-1"/>
             <data id="vm" expr="-1"/>
             <data id="combined" expr="-1"/>
+            <data id="session" expr="-1"/>
+            <data id="session_vm" expr="-1"/>
         </datamodel>
         <state>
             <onentry><assign location="entered" expr="_time"/></onentry>
@@ -52,6 +54,8 @@ fn time_is_sampled_only_when_the_chart_runs_in_native_and_vm_expressions() {
                 <assign location="native" expr="_time"/>
                 <assign location="vm" expr="(function() return _time end)()"/>
                 <assign location="combined" expr="_time + _event.data + (config.offset or 0)"/>
+                <assign location="session" expr="_session_time"/>
+                <assign location="session_vm" expr="(function() return _session_time end)()"/>
             </transition>
         </state>
         "#,
@@ -68,6 +72,8 @@ fn time_is_sampled_only_when_the_chart_runs_in_native_and_vm_expressions() {
     assert_eq!(number(execution.data("native")), 1.25);
     assert_eq!(number(execution.data("vm")), 1.25);
     assert_eq!(number(execution.data("combined")), 3.25);
+    assert_eq!(number(execution.data("session")), 1.25);
+    assert_eq!(number(execution.data("session_vm")), 1.25);
 }
 
 #[test]
@@ -119,10 +125,10 @@ fn deadlines_use_time_and_late_delivery_reads_actual_processing_time() {
 }
 
 #[test]
-fn virtual_time_pause_and_speed_apply_without_a_separate_clock() {
+fn virtual_time_pause_and_speed_apply_to_game_and_session_time() {
     let mut execution = execution(
-        r#"<datamodel><data id="sampled" expr="0"/></datamodel>
-        <state><transition event="sample"><assign location="sampled" expr="_time"/></transition></state>"#,
+        r#"<datamodel><data id="sampled" expr="0"/><data id="session" expr="0"/></datamodel>
+        <state><transition event="sample"><assign location="sampled" expr="_time"/><assign location="session" expr="_session_time"/></transition></state>"#,
     );
     execution
         .app_mut()
@@ -137,6 +143,7 @@ fn virtual_time_pause_and_speed_apply_without_a_separate_clock() {
     execution.app_mut().update();
     execution.process_event(Sample);
     assert_eq!(number(execution.data("sampled")), 0.);
+    assert_eq!(number(execution.data("session")), 0.);
     {
         let mut time = execution
             .app_mut()
@@ -148,6 +155,7 @@ fn virtual_time_pause_and_speed_apply_without_a_separate_clock() {
     execution.app_mut().update();
     execution.process_event(Sample);
     assert_eq!(number(execution.data("sampled")), 0.2);
+    assert_eq!(number(execution.data("session")), 0.2);
 }
 
 #[test]
@@ -155,6 +163,8 @@ fn time_cannot_be_declared_or_assigned_as_datamodel_state() {
     for body in [
         r#"<datamodel><data id="_time" expr="0"/></datamodel><state/>"#,
         r#"<state><onentry><assign location="_time" expr="0"/></onentry></state>"#,
+        r#"<datamodel><data id="_session_time" expr="0"/></datamodel><state/>"#,
+        r#"<state><onentry><assign location="_session_time" expr="0"/></onentry></state>"#,
     ] {
         let source = format!(
             r#"<scxml xmlns="http://www.w3.org/2005/07/scxml" datamodel="luau">{body}</scxml>"#

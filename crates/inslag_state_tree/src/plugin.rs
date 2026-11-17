@@ -561,6 +561,7 @@ type StateTreeRegistries<'w> = (
 
 type StateTreeRuntime<'w> = (
     Res<'w, Time>,
+    Res<'w, crate::GameTime>,
     ResMut<'w, StateTreeTimers>,
     Res<'w, StateTreeSettings>,
     Option<Res<'w, crate::StateTreeTraceLog>>,
@@ -574,7 +575,8 @@ fn initialize_pending(
     runtime: StateTreeRuntime<'_>,
     mut instances: PendingStateTrees<'_, '_>,
 ) {
-    let (time, mut timers, settings, traces) = runtime;
+    let (time, game_time, mut timers, settings, traces) = runtime;
+    let now = game_time.sample(&time);
     for (entity, mut instance, previous_failure, configuration) in &mut instances {
         // Let every consumer process cancellation before fresh entry actions
         // and activities can run. Execution is absent during this boundary;
@@ -610,7 +612,7 @@ fn initialize_pending(
             }
         };
         instance.set_configuration(configuration);
-        instance.set_time(time.elapsed());
+        instance.set_time(now);
         let has_activities = !linked.compiled.activities.is_empty();
         if let Some(traces) = traces.as_deref() {
             traces.record(entity, |trace| {
@@ -667,19 +669,17 @@ type TimedStateTrees<'w, 's> = Query<'w, 's, (Entity, &'static mut StateTreeInst
 
 fn process_timers(
     commands: ParallelCommands,
-    time: Res<Time>,
-    settings: Res<StateTreeSettings>,
-    traces: Option<Res<crate::StateTreeTraceLog>>,
-    mut timers: ResMut<StateTreeTimers>,
+    runtime: StateTreeRuntime<'_>,
     mut instances: TimedStateTrees<'_, '_>,
 ) {
-    let now = time.elapsed();
+    let (time, game_time, mut timers, settings, traces) = runtime;
+    let now = game_time.sample(&time);
     timers.compact_if_needed();
     let mut due = Vec::new();
     while timers
         .heap
         .peek()
-        .is_some_and(|Reverse(timer)| timer.deadline <= now)
+        .is_some_and(|Reverse(timer)| timer.deadline <= now.runtime)
     {
         let Reverse(timer) = timers.heap.pop().expect("peeked timer exists");
         let active = ActiveTimer {
@@ -790,10 +790,7 @@ fn process_timers(
 fn process_activity_outcomes(
     commands: ParallelCommands,
     ingress: Res<StateTreeActivityIngress>,
-    time: Res<Time>,
-    mut timers: ResMut<StateTreeTimers>,
-    settings: Res<StateTreeSettings>,
-    traces: Option<Res<crate::StateTreeTraceLog>>,
+    runtime: StateTreeRuntime<'_>,
     mut instances: Query<(Entity, &mut StateTreeInstance, &StateTreeActivityInbox)>,
 ) {
     if !ingress
@@ -812,7 +809,8 @@ fn process_activity_outcomes(
     if entities.is_empty() {
         return;
     }
-    let now = time.elapsed();
+    let (time, game_time, mut timers, settings, traces) = runtime;
+    let now = game_time.sample(&time);
     {
         let staged = &timers.staged;
         let process = |(entity, mut instance, inbox): (
@@ -887,7 +885,7 @@ fn process_events(
     runtime: StateTreeRuntime<'_>,
     mut instances: StateTrees<'_, '_>,
 ) {
-    let (time, mut timers, settings, traces) = runtime;
+    let (time, game_time, mut timers, settings, traces) = runtime;
     let protocol = registry.protocol();
     let ingress = &mut *ingress;
     let broadcasts = ingress
@@ -903,7 +901,7 @@ fn process_events(
         return;
     }
     let microstep_limit = settings.max_microsteps.get();
-    let now = time.elapsed();
+    let now = game_time.sample(&time);
     {
         let staged = &timers.staged;
         let process_instance = |(entity, mut instance, inbox): (

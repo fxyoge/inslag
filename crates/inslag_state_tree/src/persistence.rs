@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 #[serde(deny_unknown_fields)]
 struct Snapshot {
     format: u32,
+    game_elapsed: std::time::Duration,
     trees: Vec<TreeSnapshot>,
 }
 
@@ -125,8 +126,15 @@ impl inslag_persist::adapter::SaveAdapter for DatamodelAdapter {
     }
     fn capture(&self, world: &mut World) -> Result<inslag_persist::adapter::Captured, Error> {
         let trees = crate::plugin::persistence::capture(world)?;
+        let game_elapsed = world
+            .resource::<crate::GameTime>()
+            .elapsed(world.resource::<bevy_time::Time>());
         Ok(inslag_persist::adapter::Captured {
-            bytes: serde_json::to_vec(&Snapshot { format: 2, trees })?,
+            bytes: serde_json::to_vec(&Snapshot {
+                format: 3,
+                game_elapsed,
+                trees,
+            })?,
             context: Box::new(()),
         })
     }
@@ -141,7 +149,7 @@ impl inslag_persist::adapter::SaveAdapter for DatamodelAdapter {
         struct Version {
             format: u32,
         }
-        if serde_json::from_slice::<Version>(bytes)?.format != 2 {
+        if serde_json::from_slice::<Version>(bytes)?.format != 3 {
             return Err(invalid("unsupported datamodel snapshot format"));
         }
         let snapshot: Snapshot = serde_json::from_slice(bytes)?;
@@ -163,6 +171,11 @@ impl inslag_persist::adapter::SaveAdapter for DatamodelAdapter {
         Ok(inslag_persist::adapter::Prepared {
             entities,
             apply: Box::new(move |world| {
+                let time = crate::GameTime::loaded(
+                    snapshot.game_elapsed,
+                    world.resource::<bevy_time::Time>(),
+                );
+                world.insert_resource(time);
                 apply(world);
                 world.resource_mut::<Registry>().pending_definitions.clear();
             }),
@@ -172,6 +185,8 @@ impl inslag_persist::adapter::SaveAdapter for DatamodelAdapter {
     fn clear(&self, world: &mut World) {
         crate::plugin::persistence::clear(world);
         world.resource_mut::<Registry>().pending_definitions.clear();
+        let time = crate::GameTime::new(world.resource::<bevy_time::Time>());
+        world.insert_resource(time);
     }
 }
 

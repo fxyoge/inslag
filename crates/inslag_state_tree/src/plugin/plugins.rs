@@ -46,6 +46,7 @@ impl Plugin for StateTreePlugin {
         }
 
         app.init_resource::<StateTreeEventIngress>()
+            .init_resource::<crate::GameTime>()
             .insert_resource(StateTreeSchedule(self.schedule))
             .init_resource::<StateTreeAppEventRegistry>()
             .init_resource::<crate::StateTreeProtocolInventory>()

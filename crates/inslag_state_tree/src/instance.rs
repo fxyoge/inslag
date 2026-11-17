@@ -310,7 +310,7 @@ struct InstanceRuntime {
     active_states: Option<Box<[bool]>>,
     parallel: Option<Box<ParallelRuntime>>,
     internal_events: VecDeque<EventId>,
-    now: Duration,
+    time: crate::time::TimeSample,
     timers: Vec<TimerSlot>,
     activities: Option<Box<[ActivitySlot]>>,
     history: Option<Box<HistoryRuntime>>,
@@ -423,7 +423,7 @@ impl StateTreeInstance {
                 active_states: None,
                 parallel: None,
                 internal_events: VecDeque::new(),
-                now: Duration::ZERO,
+                time: crate::time::TimeSample::default(),
                 timers: Vec::new(),
                 activities: None,
                 history: None,
@@ -514,8 +514,8 @@ impl StateTreeInstance {
                 .is_some_and(|events| !events.is_empty())
     }
 
-    pub(crate) fn set_time(&mut self, now: Duration) {
-        self.runtime.now = now;
+    pub(crate) fn set_time(&mut self, time: crate::time::TimeSample) {
+        self.runtime.time = time;
     }
 
     pub(crate) fn drain_timer_updates(&mut self) -> std::vec::Drain<'_, TimerUpdate> {
@@ -1895,10 +1895,12 @@ impl Execution<'_> {
                     timer_duration(&value).map_err(fault)?
                 }
             };
-            let deadline =
-                self.runtime.now.checked_add(duration).ok_or_else(|| {
-                    fault("ist:after deadline exceeds the simulation clock range")
-                })?;
+            let deadline = self
+                .runtime
+                .time
+                .runtime
+                .checked_add(duration)
+                .ok_or_else(|| fault("ist:after deadline exceeds the simulation clock range"))?;
             let slot = &mut self.runtime.timers[timer.index()];
             slot.generation = slot.generation.wrapping_add(1);
             slot.armed = true;
@@ -2224,7 +2226,7 @@ impl Execution<'_> {
             self.configuration.as_deref(),
             event_name,
             event_data,
-            self.now.as_secs_f64(),
+            self.time,
         )
         .map_err(|error| RuntimeFault::Datamodel {
             operation,

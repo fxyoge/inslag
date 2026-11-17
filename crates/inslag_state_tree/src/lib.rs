@@ -127,6 +127,7 @@ mod luau;
 mod plugin;
 mod protocol;
 mod spawn_activity;
+mod time;
 mod trace;
 
 #[cfg(feature = "persistence")]
@@ -166,6 +167,7 @@ pub use protocol::{
     StateTreeDefinitionProtocol, StateTreeProtocolAnalysis, StateTreeProtocolInventory,
     StateTreeProtocolIssue, analyze_state_tree_protocol,
 };
+pub use time::GameTime;
 pub(crate) use trace::{
     NoStateTreeTrace, StateTreeHistoryResolution, StateTreeTrace, StateTreeTraceRecord,
     StateTreeTraceTrigger,
@@ -177,8 +179,8 @@ pub mod prelude {
     pub use crate::{
         Activity, ActivityCollectionRetention, ActivityRun, ActivityRuns, BroadcastStateTreeEvent,
         BroadcastStateTreeEventWriter, BuildError, DatamodelOperation, EntityStateTreeEvent,
-        EntityStateTreeEventWriter, FromStateTreeValue, HistoryId, InstanceStatus, LuauValue,
-        PersistStateTree, RuntimeFault, StateId, StateTreeAction, StateTreeActivity,
+        EntityStateTreeEventWriter, FromStateTreeValue, GameTime, HistoryId, InstanceStatus,
+        LuauValue, PersistStateTree, RuntimeFault, StateId, StateTreeAction, StateTreeActivity,
         StateTreeActivityArgs, StateTreeActivityContext, StateTreeActivityDefinition,
         StateTreeActivityError, StateTreeActivityLifecycle, StateTreeActivityOutcomeWriter,
         StateTreeActivityToken, StateTreeArgs, StateTreeArgument, StateTreeBinding,
