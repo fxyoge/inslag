@@ -2,4 +2,4 @@
 just = "1.59.0"
 "cargo:cargo-fuzz" = "0.13.2"
 "cargo:cargo-dylint" = "6.4.0"
-"cargo:dylint-link" = "6.3.2"
+"cargo:dylint-link" = "6.4.0"
