@@ -61,7 +61,7 @@ bevy_flair = { git = "https://github.com/fxyoge/bevy_flair.git", rev = "b9d7b2c5
 bevy_aseprite_ultra = "0.10.0"
 arboard = { version = "3", default-features = false }
 bevy_enhanced_input = { version = "0.27", default-features = false }
-rodio = { version = "0.22", default-features = false }
+rodio = { version = "0.23", default-features = false }
 tracing = "0.1"
 
 [workspace.lints.rust]
