@@ -121,7 +121,7 @@ use std::{
 };
 
 use full_moon::visitors::Visitor;
-use mlua::{ChunkMode, Compiler, Function, Lua, Table, Value};
+use mlua::{ChunkMode, Compiler, Function, IntoLua, Lua, Table, Value};
 
 const FUNCTION_CACHE_CAPACITY: usize = 256;
 
@@ -650,7 +650,7 @@ fn context_value<'scope, 'env: 'scope>(
                             let mut path = path.clone();
                             path.push(LuauValue::Integer(index as i64));
                             Ok((
-                                Value::Integer(index as i64),
+                                index.into_lua(lua)?,
                                 context_value(lua, scope, context, path)?,
                             ))
                         })?;
@@ -686,7 +686,7 @@ fn to_lua(lua: &Lua, value: &LuauValue) -> Result<Value, Error> {
     Ok(match value {
         LuauValue::Nil => Value::Nil,
         LuauValue::Boolean(value) => Value::Boolean(*value),
-        LuauValue::Integer(value) => Value::Integer(*value),
+        LuauValue::Integer(value) => value.into_lua(lua)?,
         LuauValue::Number(value) => Value::Number(*value),
         LuauValue::String(value) => Value::String(lua.create_string(value.as_bytes())?),
         LuauValue::Sequence(values) => {
@@ -746,7 +746,10 @@ fn from_lua(value: Value, conversion: &mut Conversion, depth: usize) -> Result<L
     Ok(match value {
         Value::Nil => LuauValue::Nil,
         Value::Boolean(value) => LuauValue::Boolean(value),
+        #[cfg(target_pointer_width = "64")]
         Value::Integer(value) => LuauValue::Integer(value),
+        #[cfg(target_pointer_width = "32")]
+        Value::Integer(value) => LuauValue::Integer(i64::from(value)),
         Value::Number(value) => LuauValue::Number(value),
         Value::String(value) => {
             let value = value.to_str()?;
@@ -1065,6 +1068,16 @@ mod tests {
         assert_eq!(
             evaluate(&expression, &[], &[], None).unwrap(),
             LuauValue::String("READY".into())
+        );
+    }
+
+    #[test]
+    fn vm_accepts_integers_wider_than_a_32_bit_pointer() {
+        let expression = compile_expression("value == 4294967296", true).unwrap();
+        let inputs = BTreeMap::from([("value".into(), LuauValue::Integer(4_294_967_296))]);
+        assert_eq!(
+            expression.evaluate_vm(&inputs).unwrap(),
+            LuauValue::Boolean(true)
         );
     }
 
