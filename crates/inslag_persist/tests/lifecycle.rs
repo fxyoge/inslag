@@ -1,9 +1,9 @@
-use bevy_app::{App, AppExit, Last, Startup, Update};
+use bevy_app::{App, AppExit, Startup, Update};
 use bevy_ecs::prelude::*;
 use bevy_time::{Real, Time};
 use inslag_persist::{
-    AppSaveExt, Capture, Error, LoadOutcome, SaveOpened, SavePlugin, SaveRequest, SaveSet,
-    SaveStatus, WorldSaveExt, component,
+    AppSaveExt, Capture, Error, LoadOutcome, SaveOpened, SavePlugin, SaveRequest, SaveStatus,
+    WorldSaveExt, component,
 };
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -285,47 +285,17 @@ fn corrupt_destination_keeps_original_session_and_never_writes_destination() {
 }
 
 #[test]
-fn exit_saves_before_ordered_teardown_and_keeps_failed_saves_live() {
-    for fail in [false, true] {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("save.sqlite");
-        let mut app = app(&path);
-        app.update();
-        request(&mut app, SaveRequest::Save);
-        app.world_mut().resource_mut::<Counter>().0 = 64;
-        let connection = Connection::open(&path).unwrap();
-        if fail {
-            connection.execute_batch("CREATE TRIGGER reject_commit BEFORE UPDATE ON meta BEGIN SELECT RAISE(ABORT, 'failure'); END;").unwrap();
-        }
-        app.add_systems(
-            Last,
-            (|mut commands: Commands| {
-                commands.remove_resource::<Counter>();
-            })
-            .after(SaveSet::Save)
-            .run_if(bevy_ecs::schedule::common_conditions::on_message::<AppExit>),
-        );
-        app.world_mut().write_message(AppExit::Success);
-        app.update();
-        assert_eq!(
-            app.should_exit(),
-            if fail { None } else { Some(AppExit::Success) }
-        );
-        assert_eq!(
-            app.world()
-                .resource::<SaveStatus>()
-                .last_save()
-                .unwrap()
-                .is_err(),
-            fail
-        );
-        let mut reader = self::app(&path);
-        reader.update();
-        assert_eq!(
-            reader.world().resource::<Counter>().0,
-            if fail { 10 } else { 64 }
-        );
-    }
+fn exit_passes_through_without_saving_an_open_session() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("save.sqlite");
+    let mut app = app(&path);
+    app.update();
+    app.world_mut().resource_mut::<Counter>().0 = 64;
+    app.world_mut().write_message(AppExit::Success);
+    app.update();
+    assert_eq!(app.should_exit(), Some(AppExit::Success));
+    assert!(app.world().resource::<SaveStatus>().last_save().is_none());
+    assert!(!path.exists());
 }
 
 #[test]
@@ -367,7 +337,7 @@ fn exit_without_opening_a_session_does_not_create_a_save() {
 }
 
 #[test]
-fn readiness_blocks_session_switch_and_a_save_plus_exit_commits_once() {
+fn readiness_blocks_session_switch_and_a_due_autosave_does_not_duplicate_a_request() {
     let directory = tempfile::tempdir().unwrap();
     let a = directory.path().join("a.sqlite");
     let b = directory.path().join("b.sqlite");
@@ -383,9 +353,8 @@ fn readiness_blocks_session_switch_and_a_save_plus_exit_commits_once() {
     assert!(!a.exists());
     app.world_mut().resource_mut::<Ready>().0 = true;
     app.world_mut().write_message(SaveRequest::Save);
-    app.world_mut().write_message(AppExit::Success);
     tick(&mut app, Duration::from_secs(1));
-    assert_eq!(generation(&a), 1); // request, due interval, and exit coalesce
+    assert_eq!(generation(&a), 1);
 }
 
 #[test]

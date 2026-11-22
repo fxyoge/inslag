@@ -2,7 +2,9 @@
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_time::{Real, Time, TimePlugin};
-use inslag_persist::{LoadOutcome, SaveOpened, SavePlugin, SaveRequest, SaveSettings, SaveStatus};
+use inslag_persist::{
+    LoadOutcome, SaveOpened, SavePlugin, SaveRequest, SaveSettings, SaveStatus, WorldSaveExt,
+};
 use inslag_state_tree::persistence::AppPersistenceExt;
 use serde::{Deserialize, Serialize};
 use std::{path::Path, time::Duration};
@@ -158,13 +160,14 @@ fn broken_destination_retains_outgoing_world_and_original_save_path() {
 }
 
 #[test]
-fn external_exit_commits_before_exiting_even_when_autosave_is_never() {
+fn a_caller_can_save_before_exiting_without_autosave() {
     use bevy_app::AppExit;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("exit.sqlite");
     let mut app = app();
     open(&mut app, &path);
     app.world_mut().resource_mut::<Score>().0 = 83;
+    assert_eq!(app.world_mut().save().unwrap().generation, 1);
     app.world_mut().write_message(AppExit::Success);
     app.update();
     assert!(app.should_exit().is_some());

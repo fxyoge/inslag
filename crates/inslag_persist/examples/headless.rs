@@ -1,9 +1,10 @@
 //! cargo run -p inslag_persist --example headless -- /tmp/opencode/inslag-persist-example.sqlite
-use bevy_app::{App, AppExit, Update};
+use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use bevy_time::TimePlugin;
 use inslag_persist::{
-    AppSaveExt, Capture, LoadOutcome, SaveOpened, SavePlugin, SaveStatus, component,
+    AppSaveExt, Capture, Error, LoadOutcome, SaveOpened, SavePlugin, SaveStatus, WorldSaveExt,
+    component,
 };
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, time::Duration};
@@ -41,7 +42,7 @@ fn simulate(mut nodes: Query<&mut Node>) {
     }
 }
 
-fn main() {
+fn main() -> Result<(), Error> {
     let path = std::env::args_os()
         .nth(1)
         .map(PathBuf::from)
@@ -72,11 +73,7 @@ fn main() {
         std::thread::sleep(Duration::from_millis(10));
         app.update();
     }
-    app.world_mut().write_message(AppExit::Success);
-    app.update();
-    let status = app.world().resource::<SaveStatus>();
-    println!("Final save: {:?}", status.last_save());
-    if app.should_exit().is_some_and(|exit| exit.is_error()) {
-        std::process::exit(1);
-    }
+    let stats = app.world_mut().save()?;
+    println!("Final save: {stats:?}");
+    Ok(())
 }

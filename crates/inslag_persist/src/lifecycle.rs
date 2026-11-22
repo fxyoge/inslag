@@ -3,7 +3,7 @@ use crate::{
     registration::{self, Registry},
     storage::{self, Storage},
 };
-use bevy_app::{App, AppExit, Last, PreStartup};
+use bevy_app::{App, Last, PreStartup};
 use bevy_ecs::{
     prelude::*,
     schedule::{ScheduleLabel, SystemSet},
@@ -36,7 +36,7 @@ pub(crate) struct CheckReadiness;
 
 #[derive(Resource, Default, Clone, PartialEq, Eq)]
 pub struct SaveSettings {
-    /// Set to `None` to disable autosave. Requests and exit saves still work.
+    /// Set to `None` to disable autosave.
     pub interval: Option<Duration>,
 }
 
@@ -89,8 +89,6 @@ pub(crate) struct SaveSession {
     opening: Option<Opening>,
     requests: VecDeque<SaveRequest>,
     prepared: Option<SaveRequest>,
-    exit: Option<AppExit>,
-    exit_released: bool,
     deadline: Duration,
     interval: Option<Duration>,
     enabled: bool,
@@ -113,8 +111,6 @@ pub(crate) fn install(app: &mut App, load_on_start: bool, interval: Option<Durat
             opening: None,
             requests: VecDeque::new(),
             prepared: None,
-            exit: None,
-            exit_released: false,
             deadline: Duration::MAX,
             interval: None,
             enabled: true,
@@ -150,8 +146,6 @@ fn collect(
     mut session: ResMut<SaveSession>,
     settings: Res<SaveSettings>,
     time: Option<Res<Time<Real>>>,
-    status: Res<SaveStatus>,
-    mut exits: ResMut<Messages<AppExit>>,
 ) {
     let now = time.as_ref().map_or(Duration::ZERO, |time| time.elapsed());
     assert!(
@@ -169,16 +163,6 @@ fn collect(
             .map_or(Duration::MAX, |interval| now.saturating_add(interval));
     }
     session.requests.extend(requests.read().cloned());
-    if status.writable && session.exit.is_none() && !session.exit_released && !exits.is_empty() {
-        session.exit = exits.drain().max_by_key(|exit| u8::from(exit.is_error()));
-        if !session
-            .requests
-            .iter()
-            .any(|request| matches!(request, SaveRequest::Save))
-        {
-            session.requests.push_back(SaveRequest::Save);
-        }
-    }
 }
 fn has_work(
     session: Res<SaveSession>,
@@ -334,12 +318,6 @@ fn save(world: &mut World) -> Result<(), Error> {
         Err(Error::NotReady)
     };
     record_save(world, &result);
-    if result.is_ok()
-        && let Some(exit) = world.resource_mut::<SaveSession>().exit.take()
-    {
-        world.resource_mut::<SaveSession>().exit_released = true;
-        world.write_message(exit);
-    }
     result.map(|_| ())
 }
 fn outgoing(world: &World) -> bool {

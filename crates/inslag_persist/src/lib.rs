@@ -54,7 +54,6 @@
 //! ```
 //!
 //! The interval uses real time, so pausing the simulation does not pause autosave.
-//! A final save is also attempted when the app exits with [`AppExit`](bevy_app::AppExit).
 //!
 //! # Open and close saves
 //!
