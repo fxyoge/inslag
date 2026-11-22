@@ -550,7 +550,11 @@ fn sqlite_failure_rolls_back_prior_writes_and_preserves_pending_changes() {
         writer.world_mut().get_mut::<Label>(entity).unwrap().0 = "new".into();
         mark::<Position>(writer.world_mut(), entity);
         mark::<Label>(writer.world_mut(), entity);
-        assert!(matches!(writer.world_mut().save(), Err(Error::Sqlite(_))));
+        let error = writer.world_mut().save().unwrap_err();
+        assert!(matches!(error, Error::Io(_)));
+        assert!(
+            std::error::Error::source(&error).is_some_and(|source| source.is::<rusqlite::Error>())
+        );
         let mut reader = app(&path, strategy);
         reader.world_mut().load().unwrap();
         assert_eq!(
@@ -781,4 +785,15 @@ fn empty_files_and_directories_are_failed_loads_not_missing_saves() {
         assert!(matches!(app.world_mut().save(), Err(Error::LoadRequired)));
     }
     assert_eq!(std::fs::metadata(empty).unwrap().len(), 0);
+}
+
+#[test]
+fn filesystem_failures_preserve_the_io_source() {
+    let mut app = app(Path::new("invalid\0path"), Capture::Snapshot);
+    let error = app.world_mut().load().unwrap_err();
+    assert!(matches!(error, Error::Io(_)));
+    let source = std::error::Error::source(&error)
+        .and_then(|source| source.downcast_ref::<std::io::Error>())
+        .unwrap();
+    assert_eq!(source.kind(), std::io::ErrorKind::InvalidInput);
 }

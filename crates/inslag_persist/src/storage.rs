@@ -28,8 +28,6 @@ pub enum Error {
     NotReady,
     #[error("session is closed; open a save path first")]
     Closed,
-    #[error("SQLite: {0}")]
-    Sqlite(#[from] rusqlite::Error),
     #[error("encoding {key}: {source}")]
     Encode {
         key: &'static str,
@@ -45,7 +43,7 @@ pub enum Error {
     #[error("load this save successfully before writing")]
     LoadRequired,
     #[error("save file: {0}")]
-    Io(#[from] std::io::Error),
+    Io(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("unrecognized database or unsupported save format")]
     Format,
     #[error("persistent type keys/roles do not match this save's manifest")]
@@ -56,6 +54,18 @@ pub enum Error {
     InvalidData(String),
     #[error("waiting for asset: {0}")]
     AssetNotReady(String),
+}
+
+impl From<std::io::Error> for Error {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(Box::new(error))
+    }
+}
+
+impl From<rusqlite::Error> for Error {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Io(Box::new(error))
+    }
 }
 
 impl From<serde_json::Error> for Error {
@@ -390,7 +400,7 @@ fn load_inner(world: &mut World) -> Result<LoadOutcome, Error> {
             {
                 match std::fs::metadata(&storage.path) {
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                    Err(error) => return Err(Error::Io(error)),
+                    Err(error) => return Err(error.into()),
                     Ok(_) => {}
                 }
             }
