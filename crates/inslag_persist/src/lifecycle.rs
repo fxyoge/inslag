@@ -5,12 +5,12 @@ use crate::{
 };
 use bevy_app::{App, Last, PreStartup};
 use bevy_ecs::{
+    message::MessageCursor,
     prelude::*,
-    schedule::{ScheduleLabel, SystemSet},
+    schedule::{ScheduleLabel, SystemSet, common_conditions::on_message},
 };
 use bevy_time::{Real, Time};
 use std::{
-    collections::VecDeque,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -87,11 +87,17 @@ struct Opening {
 #[derive(Resource)]
 pub(crate) struct SaveSession {
     opening: Option<Opening>,
-    requests: VecDeque<SaveRequest>,
     prepared: Option<SaveRequest>,
+    running: bool,
     deadline: Duration,
     interval: Option<Duration>,
     enabled: bool,
+}
+
+impl SaveSession {
+    fn is_busy(&self) -> bool {
+        self.running || self.opening.is_some() || self.prepared.is_some()
+    }
 }
 
 pub(crate) fn install(app: &mut App, load_on_start: bool, interval: Option<Duration>) {
@@ -109,8 +115,8 @@ pub(crate) fn install(app: &mut App, load_on_start: bool, interval: Option<Durat
         .init_resource::<SaveSettings>()
         .insert_resource(SaveSession {
             opening: None,
-            requests: VecDeque::new(),
             prepared: None,
+            running: false,
             deadline: Duration::MAX,
             interval: None,
             enabled: true,
@@ -118,7 +124,10 @@ pub(crate) fn install(app: &mut App, load_on_start: bool, interval: Option<Durat
         .add_systems(PreStartup, registration::initialize.before(SaveSet::Load))
         .add_systems(
             Last,
-            (collect, process.run_if(has_work))
+            (
+                update_interval,
+                process.run_if(has_work.or_eager(on_message::<SaveRequest>)),
+            )
                 .chain()
                 .in_set(SaveSet::Save),
         );
@@ -134,15 +143,34 @@ fn initial_load(world: &mut World) {
     if !world.resource::<Registry>().started
         && let Some(path) = world.resource::<SaveStatus>().path.clone()
     {
-        begin_open(world, path);
-        finish_open(world);
+        run_active(world, |world| open(world, path));
     }
 }
+
+pub(crate) fn run_idle<T>(
+    world: &mut World,
+    operation: impl FnOnce(&mut World) -> Result<T, Error>,
+) -> Result<T, Error> {
+    let session = world
+        .get_resource::<SaveSession>()
+        .ok_or(Error::MissingPlugin)?;
+    if session.is_busy() {
+        return Err(Error::Busy);
+    }
+    run_active(world, operation)
+}
+
+fn run_active<T>(world: &mut World, operation: impl FnOnce(&mut World) -> T) -> T {
+    world.resource_mut::<SaveSession>().running = true;
+    let result = operation(world);
+    world.resource_mut::<SaveSession>().running = false;
+    result
+}
+
 pub(crate) fn set_enabled(In(enabled): In<bool>, mut session: ResMut<SaveSession>) {
     session.enabled = enabled;
 }
-fn collect(
-    mut requests: MessageReader<SaveRequest>,
+fn update_interval(
     mut session: ResMut<SaveSession>,
     settings: Res<SaveSettings>,
     time: Option<Res<Time<Real>>>,
@@ -162,7 +190,6 @@ fn collect(
             .interval
             .map_or(Duration::MAX, |interval| now.saturating_add(interval));
     }
-    session.requests.extend(requests.read().cloned());
 }
 fn has_work(
     session: Res<SaveSession>,
@@ -170,28 +197,32 @@ fn has_work(
     time: Option<Res<Time<Real>>>,
 ) -> bool {
     let now = time.as_ref().map_or(Duration::ZERO, |time| time.elapsed());
-    session.opening.is_some()
-        || session.prepared.is_some()
-        || !session.requests.is_empty()
-        || (status.writable && now >= session.deadline)
+    session.is_busy() || (status.writable && now >= session.deadline)
 }
-fn process(world: &mut World) {
+fn process(world: &mut World, mut cursor: Local<MessageCursor<SaveRequest>>) {
+    let messages = world.resource::<Messages<SaveRequest>>();
+    let mut requests = cursor.read(messages);
+    let request = if world.resource::<SaveSession>().is_busy() {
+        None
+    } else {
+        requests.next().cloned()
+    };
+    let rejected_save = requests.any(|request| matches!(request, SaveRequest::Save));
+    cursor.clear(messages);
+    if rejected_save {
+        record_save(world, &Err(Error::Busy));
+    }
+    run_active(world, |world| process_active(world, request));
+}
+
+fn process_active(world: &mut World, request: Option<SaveRequest>) {
     if world.resource::<SaveSession>().opening.is_some() {
         finish_open(world);
-        if world.resource::<SaveSession>().opening.is_some() {
-            return;
-        }
+        return;
     }
-    let mut prepared = world.resource_mut::<SaveSession>().prepared.take();
-    let requested = prepared.is_some() || !world.resource::<SaveSession>().requests.is_empty();
-    loop {
-        let already_prepared = prepared.is_some();
-        let Some(request) = prepared
-            .take()
-            .or_else(|| world.resource_mut::<SaveSession>().requests.pop_front())
-        else {
-            break;
-        };
+    let prepared = world.resource_mut::<SaveSession>().prepared.take();
+    let already_prepared = prepared.is_some();
+    if let Some(request) = prepared.or(request) {
         // A preparation schedule is optional. Ordinary games save immediately;
         // gameplay settlement commands get a normal cleanup frame when installed.
         let has_preparation = world
@@ -214,20 +245,16 @@ fn process(world: &mut World) {
             }
             SaveRequest::Load => {
                 if let Some(path) = world.resource::<SaveStatus>().path.clone() {
-                    begin_open(world, path);
+                    open(world, path);
                 }
             }
             SaveRequest::Open(path) => {
-                if outgoing(world) && save(world).is_err() {
-                    continue;
+                if !outgoing(world) || save(world).is_ok() {
+                    open(world, path);
                 }
-                begin_open(world, path);
             }
             SaveRequest::Close => {
-                if outgoing(world) {
-                    if save(world).is_err() {
-                        continue;
-                    }
+                if outgoing(world) && save(world).is_ok() {
                     storage::clear_scope(world);
                     world.resource_mut::<Storage>().close();
                     *world.resource_mut::<SaveStatus>() = SaveStatus::default();
@@ -235,30 +262,17 @@ fn process(world: &mut World) {
                 }
             }
         }
-        if world.resource::<SaveSession>().opening.is_some() {
-            finish_open(world);
-            if world.resource::<SaveSession>().opening.is_some() {
-                return;
-            }
-        }
+        return;
     }
     let now = world
         .get_resource::<Time<Real>>()
         .map_or(Duration::ZERO, |time| time.elapsed());
-    if !requested
-        && world.resource::<SaveStatus>().writable
-        && now >= world.resource::<SaveSession>().deadline
-    {
-        if ready(world) {
-            let result = storage::save(world);
-            record_save(world, &result);
-        } else {
-            record_save(world, &Err(Error::NotReady));
-        }
+    if world.resource::<SaveStatus>().writable && now >= world.resource::<SaveSession>().deadline {
+        let _ = save(world);
         reset_deadline(world);
     }
 }
-fn begin_open(world: &mut World, path: PathBuf) {
+fn open(world: &mut World, path: PathBuf) {
     world.resource_mut::<SaveSession>().opening = Some(Opening {
         storage: Storage::new(path.clone()),
         path,
@@ -266,6 +280,7 @@ fn begin_open(world: &mut World, path: PathBuf) {
     let mut status = world.resource_mut::<SaveStatus>();
     status.loading = true;
     status.load = None;
+    finish_open(world);
 }
 fn finish_open(world: &mut World) {
     if !ready(world) {

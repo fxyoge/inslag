@@ -299,7 +299,7 @@ fn exit_passes_through_without_saving_an_open_session() {
 }
 
 #[test]
-fn opening_later_and_request_order_need_no_custom_persistence_system() {
+fn only_the_first_request_in_a_batch_runs() {
     let directory = tempfile::tempdir().unwrap();
     let a = directory.path().join("a.sqlite");
     let b = directory.path().join("b.sqlite");
@@ -319,9 +319,40 @@ fn opening_later_and_request_order_need_no_custom_persistence_system() {
     app.world_mut().write_message(SaveRequest::Save);
     app.world_mut().write_message(SaveRequest::Close);
     app.update();
+    app.update();
+    let status = app.world().resource::<SaveStatus>();
+    assert_eq!(status.path(), Some(b.as_path()));
+    assert!(status.can_save());
     assert!(!a.exists());
-    assert_eq!(generation(&b), 2);
-    assert!(!app.world().resource::<SaveStatus>().can_save());
+    assert!(!b.exists());
+    assert_eq!(app.world_mut().save().unwrap().generation, 1);
+}
+
+#[test]
+fn saving_during_an_open_is_busy_and_is_not_retried() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("save.sqlite");
+    let mut app = app(&path);
+    app.world_mut().resource_mut::<Ready>().0 = false;
+    app.add_systems(SaveOpened, |world: &mut World| {
+        assert!(matches!(world.save(), Err(Error::Busy)));
+    });
+    app.update();
+    assert!(app.world().resource::<SaveStatus>().is_loading());
+    assert!(matches!(app.world_mut().save(), Err(Error::Busy)));
+    assert!(matches!(app.world_mut().load(), Err(Error::Busy)));
+    request(&mut app, SaveRequest::Save);
+    let status = app.world().resource::<SaveStatus>();
+    assert_eq!(
+        status.last_save().unwrap().as_ref().unwrap_err(),
+        &Error::Busy.to_string()
+    );
+    app.world_mut().resource_mut::<Ready>().0 = true;
+    request(&mut app, SaveRequest::Save);
+    app.update();
+    assert!(app.world().resource::<SaveStatus>().can_save());
+    assert!(!path.exists());
+    assert_eq!(app.world_mut().save().unwrap().generation, 1);
 }
 
 #[test]

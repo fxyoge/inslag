@@ -22,6 +22,8 @@ const FORMAT: i64 = 1;
 pub enum Error {
     #[error("install SavePlugin before saving or loading")]
     MissingPlugin,
+    #[error("another persistence operation is in progress")]
+    Busy,
     #[error("session is not ready to save")]
     NotReady,
     #[error("session is closed; open a save path first")]

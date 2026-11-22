@@ -180,7 +180,7 @@ fn a_caller_can_save_before_exiting_without_autosave() {
 #[test]
 fn preparation_commands_get_a_normal_cleanup_frame_before_capture() {
     use bevy_app::Update;
-    use inslag_persist::PrepareSave;
+    use inslag_persist::{Error, PrepareSave};
     #[derive(Component, Serialize, Deserialize)]
     struct Owner;
     #[derive(Resource, Default, Serialize, Deserialize)]
@@ -217,13 +217,19 @@ fn preparation_commands_get_a_normal_cleanup_frame_before_capture() {
     app.world_mut().write_message(SaveRequest::Save);
     app.update();
     assert!(!path.exists());
+    assert!(matches!(app.world_mut().save(), Err(Error::Busy)));
+    app.world_mut().write_message(SaveRequest::Save);
     app.update();
-    assert!(
+    app.update();
+    assert_eq!(
         app.world()
             .resource::<SaveStatus>()
             .last_save()
             .unwrap()
-            .is_ok()
+            .as_ref()
+            .unwrap()
+            .generation,
+        1
     );
     assert!(app.world().resource::<Owners>().0.is_empty());
 }

@@ -129,21 +129,21 @@ pub enum LoadOutcome {
 
 impl WorldSaveExt for World {
     fn save(&mut self) -> Result<SaveStats, Error> {
-        let result = storage::save(self);
-        if self.contains_resource::<SaveStatus>() {
-            lifecycle::record_save(self, &result);
-        }
-        result
+        lifecycle::run_idle(self, |world| {
+            let result = storage::save(world);
+            lifecycle::record_save(world, &result);
+            result
+        })
     }
 
     fn load(&mut self) -> Result<LoadOutcome, Error> {
-        let result = storage::load(self);
-        if matches!(result, Ok(LoadOutcome::Missing)) {
-            storage::clear_scope(self);
-        }
-        if self.contains_resource::<SaveStatus>() {
-            lifecycle::record_load(self, &result);
-        }
-        result
+        lifecycle::run_idle(self, |world| {
+            let result = storage::load(world);
+            if matches!(result, Ok(LoadOutcome::Missing)) {
+                storage::clear_scope(world);
+            }
+            lifecycle::record_load(world, &result);
+            result
+        })
     }
 }
