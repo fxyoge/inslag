@@ -1,5 +1,6 @@
 use super::*;
-use std::{collections::BTreeMap, future::Future, pin::Pin};
+use bevy::tasks::BoxedFuture;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct KuiComponentContract {
@@ -374,17 +375,11 @@ pub(super) fn parse_meter(
 }
 
 pub(super) trait SourceReader {
-    fn read<'a>(
-        &'a mut self,
-        path: String,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, String>> + Send + 'a>>;
+    fn read(&mut self, path: String) -> BoxedFuture<'_, Result<Vec<u8>, String>>;
 }
 
 impl SourceReader for LoadContext<'_> {
-    fn read<'a>(
-        &'a mut self,
-        path: String,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, String>> + Send + 'a>> {
+    fn read(&mut self, path: String) -> BoxedFuture<'_, Result<Vec<u8>, String>> {
         Box::pin(async move {
             self.read_asset_bytes(path)
                 .await
@@ -394,10 +389,7 @@ impl SourceReader for LoadContext<'_> {
 }
 
 impl SourceReader for BTreeMap<String, String> {
-    fn read<'a>(
-        &'a mut self,
-        path: String,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, String>> + Send + 'a>> {
+    fn read(&mut self, path: String) -> BoxedFuture<'_, Result<Vec<u8>, String>> {
         Box::pin(std::future::ready(
             self.get(&path)
                 .map(|source| source.as_bytes().to_vec())
@@ -412,7 +404,7 @@ pub(super) fn compile<'a>(
     styles: &'a mut Vec<String>,
     chain: Vec<String>,
     inherited_style: Option<String>,
-) -> Pin<Box<dyn Future<Output = Result<(), KuiLoaderError>> + Send + 'a>> {
+) -> BoxedFuture<'a, Result<(), KuiLoaderError>> {
     Box::pin(async move {
         let imports = definition.imports.clone();
         let caller_style = definition
@@ -442,7 +434,7 @@ fn expand<'a>(
     styles: &'a mut Vec<String>,
     chain: &'a [String],
     caller_style: Option<String>,
-) -> Pin<Box<dyn Future<Output = Result<(), KuiLoaderError>> + Send + 'a>> {
+) -> BoxedFuture<'a, Result<(), KuiLoaderError>> {
     Box::pin(async move {
         for node in nodes {
             match &mut node.kind {
