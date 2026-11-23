@@ -365,16 +365,8 @@ pub fn parse(source_name: &str, source: &str) -> Result<KuiDefinition, KuiParseE
                 ));
             }
             Event::Comment(_) => {}
-            Event::Text(text)
-                if text
-                    .decode()
-                    .map(|text| text.trim().is_empty())
-                    .unwrap_or(false) => {}
-            Event::CData(text)
-                if text
-                    .decode()
-                    .map(|text| text.trim().is_empty())
-                    .unwrap_or(false) => {}
+            Event::Text(text) if text.trim().is_empty() => {}
+            Event::CData(text) if text.trim().is_empty() => {}
             Event::Start(start) if !saw_root => {
                 let tag = element_name(&start, &reader, source_name)?;
                 if tag != "view" && tag != "component" {
@@ -565,20 +557,12 @@ fn parse_root_children(
                     )?);
                 }
             }
-            Event::End(end) if end.name().as_ref() == closing.as_bytes() => {
+            Event::End(end) if end.name().into_inner() == closing => {
                 return Ok((style, children, imports, contract));
             }
             Event::End(_) => return Err(error(reader, source_name, "unexpected closing element")),
-            Event::Text(text)
-                if text
-                    .decode()
-                    .map(|text| text.trim().is_empty())
-                    .unwrap_or(false) => {}
-            Event::CData(text)
-                if text
-                    .decode()
-                    .map(|text| text.trim().is_empty())
-                    .unwrap_or(false) => {}
+            Event::Text(text) if text.trim().is_empty() => {}
+            Event::CData(text) if text.trim().is_empty() => {}
             Event::Comment(_) => {}
             Event::Decl(_) => {
                 return Err(error(
@@ -816,20 +800,12 @@ fn parse_visual_children(
                     inside_button,
                 )?);
             }
-            Event::End(end) if end.name().as_ref() == closing_element.as_bytes() => {
+            Event::End(end) if end.name().into_inner() == closing_element => {
                 return Ok(children);
             }
             Event::End(_) => return Err(error(reader, source_name, "unexpected closing element")),
-            Event::Text(text)
-                if text
-                    .decode()
-                    .map(|text| text.trim().is_empty())
-                    .unwrap_or(false) => {}
-            Event::CData(text)
-                if text
-                    .decode()
-                    .map(|text| text.trim().is_empty())
-                    .unwrap_or(false) => {}
+            Event::Text(text) if text.trim().is_empty() => {}
+            Event::CData(text) if text.trim().is_empty() => {}
             Event::Comment(_) => {}
             Event::Text(_) | Event::CData(_) => {
                 return Err(error(
@@ -888,12 +864,12 @@ fn parse_text_content(
             .map_err(|error| xml_error(source_name, reader, error.to_string()))?;
         match event {
             Event::Text(text) => value.push_str(&decode_text(&text, reader, source_name)?),
-            Event::CData(text) => value.push_str(&decode_cdata(&text, reader, source_name)?),
+            Event::CData(text) => value.push_str(&text),
             Event::GeneralRef(reference) => {
                 value.push_str(&decode_reference(&reference, reader, source_name)?)
             }
             Event::Comment(_) => {}
-            Event::End(end) if end.name().as_ref() == b"text" => {
+            Event::End(end) if end.name().into_inner() == "text" => {
                 return Ok(value.split_whitespace().collect::<Vec<_>>().join(" "));
             }
             Event::End(_) => return Err(error(reader, source_name, "unexpected closing element")),
@@ -999,14 +975,7 @@ fn element_name(
     reader: &XmlReader<&[u8]>,
     source_name: &str,
 ) -> Result<String, KuiParseError> {
-    let raw_name = start.name();
-    let name = str::from_utf8(raw_name.as_ref()).map_err(|parse_error| {
-        error(
-            reader,
-            source_name,
-            format!("element name is not UTF-8: {parse_error}"),
-        )
-    })?;
+    let name = start.name().into_inner();
     if name.contains(':') {
         return Err(error(
             reader,
@@ -1405,15 +1374,7 @@ fn attributes(
                 format!("invalid attribute: {parse_error}"),
             )
         })?;
-        let key = str::from_utf8(attribute.key.as_ref())
-            .map_err(|parse_error| {
-                error(
-                    reader,
-                    source_name,
-                    format!("attribute name is not UTF-8: {parse_error}"),
-                )
-            })?
-            .to_owned();
+        let key = attribute.key.into_inner().to_owned();
         if !seen.insert(key.clone()) {
             return Err(error(
                 reader,
@@ -1422,7 +1383,7 @@ fn attributes(
             ));
         }
         let value = attribute
-            .decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, reader.decoder())
+            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
             .map_err(|parse_error| {
                 error(
                     reader,
@@ -1441,10 +1402,7 @@ fn decode_text(
     reader: &XmlReader<&[u8]>,
     source_name: &str,
 ) -> Result<String, KuiParseError> {
-    let decoded = text.decode().map_err(|parse_error| {
-        error(reader, source_name, format!("invalid text: {parse_error}"))
-    })?;
-    unescape(decoded.as_ref())
+    unescape(text)
         .map(|text| text.into_owned())
         .map_err(|parse_error| {
             error(
@@ -1455,29 +1413,12 @@ fn decode_text(
         })
 }
 
-fn decode_cdata(
-    text: &quick_xml::events::BytesCData<'_>,
-    reader: &XmlReader<&[u8]>,
-    source_name: &str,
-) -> Result<String, KuiParseError> {
-    text.decode()
-        .map(|text| text.into_owned())
-        .map_err(|parse_error| error(reader, source_name, format!("invalid CDATA: {parse_error}")))
-}
-
 fn decode_reference(
     reference: &quick_xml::events::BytesRef<'_>,
     reader: &XmlReader<&[u8]>,
     source_name: &str,
 ) -> Result<String, KuiParseError> {
-    let name = reference.decode().map_err(|parse_error| {
-        error(
-            reader,
-            source_name,
-            format!("invalid character reference: {parse_error}"),
-        )
-    })?;
-    match name.as_ref() {
+    match &**reference {
         "amp" => Ok("&".to_owned()),
         "apos" => Ok("'".to_owned()),
         "gt" => Ok(">".to_owned()),
@@ -1605,6 +1546,20 @@ mod tests {
                 expression: "ui.alt".into(),
             }]
         );
+    }
+
+    #[test]
+    fn preserves_utf8_and_resolves_xml_references() {
+        let source = format!(
+            r#"{HEADER}<text id="caf&#xE9;">Café &amp; &#x2605; <![CDATA[&amp;]]></text></view>"#
+        );
+        let definition = parse("text.kui", &source).unwrap();
+        let text = &definition.children[0];
+        assert_eq!(text.id.as_deref(), Some("café"));
+        assert!(matches!(
+            &text.kind,
+            KuiNodeKind::Text { value } if value == "Café & ★ &amp;"
+        ));
     }
 
     #[test]

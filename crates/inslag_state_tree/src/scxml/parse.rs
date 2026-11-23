@@ -66,8 +66,8 @@ impl<'a> XmlParser<'a> {
                 Ok(Event::Empty(element)) => {
                     break self.empty_element(position, &element, &HashMap::new())?;
                 }
-                Ok(Event::Text(text)) if text.iter().all(u8::is_ascii_whitespace) => {}
-                Ok(Event::CData(text)) if text.iter().all(u8::is_ascii_whitespace) => {}
+                Ok(Event::Text(text)) if text.as_bytes().iter().all(u8::is_ascii_whitespace) => {}
+                Ok(Event::CData(text)) if text.as_bytes().iter().all(u8::is_ascii_whitespace) => {}
                 Ok(Event::DocType(_)) => {
                     return Err(
                         self.error_at(position, "DOCTYPE and DTD declarations are not supported")
@@ -96,8 +96,8 @@ impl<'a> XmlParser<'a> {
         loop {
             let position = self.position();
             match self.reader.read_event_into(&mut buffer) {
-                Ok(Event::Text(text)) if text.iter().all(u8::is_ascii_whitespace) => {}
-                Ok(Event::CData(text)) if text.iter().all(u8::is_ascii_whitespace) => {}
+                Ok(Event::Text(text)) if text.as_bytes().iter().all(u8::is_ascii_whitespace) => {}
+                Ok(Event::CData(text)) if text.as_bytes().iter().all(u8::is_ascii_whitespace) => {}
                 Ok(Event::DocType(_)) => {
                     return Err(
                         self.error_at(position, "DOCTYPE and DTD declarations are not supported")
@@ -156,10 +156,7 @@ impl<'a> XmlParser<'a> {
                     parsed.children.push(child);
                 }
                 Ok(Event::Text(text)) => {
-                    let text = text
-                        .xml_content(XmlVersion::Implicit1_0)
-                        .map_err(|error| self.error_at(position, error.to_string()))?
-                        .into_owned();
+                    let text = text.xml_content(XmlVersion::Implicit1_0).into_owned();
                     if !text_allowed && !is_xml_whitespace(&text) {
                         return Err(self.error_at(
                             position,
@@ -170,10 +167,7 @@ impl<'a> XmlParser<'a> {
                     parsed.content.push(RawContent::Text(text));
                 }
                 Ok(Event::CData(text)) => {
-                    let text = text
-                        .xml_content(XmlVersion::Implicit1_0)
-                        .map_err(|error| self.error_at(position, error.to_string()))?
-                        .into_owned();
+                    let text = text.xml_content(XmlVersion::Implicit1_0).into_owned();
                     if !text_allowed && !is_xml_whitespace(&text) {
                         return Err(self.error_at(
                             position,
@@ -195,8 +189,7 @@ impl<'a> XmlParser<'a> {
                     parsed.content.push(RawContent::Text(text));
                 }
                 Ok(Event::End(end)) => {
-                    let actual_name = String::from_utf8_lossy(end.name().as_ref()).into_owned();
-                    if actual_name != expected_name {
+                    if end.name().into_inner() != expected_name {
                         return Err(self.error_at(position, "mismatched XML closing tag"));
                     }
                     parsed.span.end = self.position();
@@ -243,10 +236,7 @@ impl<'a> XmlParser<'a> {
             let value = attribute
                 .normalized_value(XmlVersion::Implicit1_0)
                 .map_err(|error| self.error_at(start, error.to_string()))?;
-            raw_attributes.push((
-                String::from_utf8_lossy(attribute.key.as_ref()).into_owned(),
-                value.into_owned(),
-            ));
+            raw_attributes.push((attribute.key.into_inner().to_owned(), value.into_owned()));
         }
 
         let mut namespaces = inherited_namespaces.clone();
@@ -309,7 +299,7 @@ impl<'a> XmlParser<'a> {
             })
             .collect::<Result<Vec<_>, Diagnostic>>()?;
 
-        let name = String::from_utf8_lossy(element.name().as_ref()).into_owned();
+        let name = element.name().into_inner().to_owned();
         let (prefix, local_name) = split_name(&name, start, self)?;
         let local_name = local_name.to_owned();
         let namespace = if let Some(prefix) = prefix {
@@ -383,18 +373,14 @@ impl<'a> XmlParser<'a> {
         }
 
         match &**reference {
-            b"amp" => Ok("&".to_owned()),
-            b"lt" => Ok("<".to_owned()),
-            b"gt" => Ok(">".to_owned()),
-            b"apos" => Ok("'".to_owned()),
-            b"quot" => Ok("\"".to_owned()),
-            name => Err(self.error_at(
-                offset,
-                format!(
-                    "undefined XML entity reference `&{};`",
-                    String::from_utf8_lossy(name)
-                ),
-            )),
+            "amp" => Ok("&".to_owned()),
+            "lt" => Ok("<".to_owned()),
+            "gt" => Ok(">".to_owned()),
+            "apos" => Ok("'".to_owned()),
+            "quot" => Ok("\"".to_owned()),
+            name => {
+                Err(self.error_at(offset, format!("undefined XML entity reference `&{name};`")))
+            }
         }
     }
 }
