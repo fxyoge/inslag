@@ -90,11 +90,12 @@ fn sustained(bencher: Bencher, percent: usize) {
 fn setup(entities: usize, percent: usize) -> Case {
     let directory = tempfile::tempdir().unwrap();
     let mut app = App::new();
-    app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")).load_on_start(false))
+    app.add_plugins(SavePlugin::sqlite(directory.path()))
         .persist(component::<Machine>("machine").capture(Capture::Dirty))
         .insert_resource(Edits(entities * percent / 100))
         .add_systems(Update, simulate);
     app.update();
+    app.new_request();
     app.world_mut()
         .spawn_batch((0..entities).map(|index| Machine {
             ticks: 0,

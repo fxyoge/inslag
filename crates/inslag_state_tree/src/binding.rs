@@ -701,11 +701,11 @@ mod tests {
         use crate::persistence_test::Requests;
         use inslag_persist::{AppSaveExt, SavePlugin};
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("save.sqlite");
         let mut source = binding_app();
         source
-            .add_plugins(SavePlugin::sqlite(&path).load_on_start(false))
+            .add_plugins(SavePlugin::sqlite(directory.path()))
             .persist_resource::<SampleSource>("sample-source");
+        let save = source.new_request();
         let handle = source
             .world_mut()
             .resource_mut::<Assets<StateTreeDefinition>>()
@@ -720,13 +720,13 @@ mod tests {
         source.save_request().unwrap();
         let mut target = binding_app();
         target
-            .add_plugins(SavePlugin::sqlite(&path).load_on_start(false))
+            .add_plugins(SavePlugin::sqlite(directory.path()))
             .persist_resource::<SampleSource>("sample-source");
         target
             .world_mut()
             .resource_mut::<Assets<StateTreeDefinition>>()
             .add(binding_definition());
-        target.load_request().unwrap();
+        target.load_request(save).unwrap();
         let restored = target
             .world_mut()
             .query_filtered::<Entity, bevy_ecs::prelude::With<StateTreeInstance>>()

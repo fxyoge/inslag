@@ -1,5 +1,5 @@
 use crate::{
-    LoadOutcome, entity,
+    SaveHandle, entity,
     identity::{Identities, Identity, IdentityChanges},
     registration::{Batch, Registry},
 };
@@ -25,8 +25,12 @@ pub enum Error {
     Busy,
     #[error("session is not ready to save")]
     NotReady,
-    #[error("session is closed; open a save path first")]
+    #[error("no save session is open")]
     Closed,
+    #[error("close the current save session first")]
+    AlreadyOpen,
+    #[error("save does not exist")]
+    NotFound,
     #[error("encoding {key}: {source}")]
     Encode {
         key: &'static str,
@@ -39,8 +43,6 @@ pub enum Error {
         #[source]
         source: serde_json::Error,
     },
-    #[error("load this save successfully before writing")]
-    LoadRequired,
     #[error("save file: {0}")]
     Io(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("unrecognized database or unsupported save format")]
@@ -79,7 +81,7 @@ pub struct SaveStats {
 }
 
 struct SaveBundle {
-    expected_generation: Option<u64>,
+    expected_generation: u64,
     manifest: BTreeMap<String, i64>,
     replace_records: bool,
     rewrite_manifest: bool,
@@ -97,8 +99,9 @@ pub(crate) struct StoredSave {
 }
 
 trait Backend: Send + Sync {
-    fn commit(&self, bundle: SaveBundle) -> Result<Pending<SaveStats>, Error>;
-    fn read(&self) -> Result<Pending<Option<StoredSave>>, Error>;
+    fn commit(&self, handle: SaveHandle, bundle: SaveBundle) -> Result<Pending<SaveStats>, Error>;
+    fn read(&self, handle: SaveHandle) -> Result<Pending<StoredSave>, Error>;
+    fn list(&self) -> Result<Pending<Vec<SaveHandle>>, Error>;
 }
 
 pub(crate) struct Pending<T>(Mutex<Receiver<Result<T, Error>>>);
@@ -125,52 +128,33 @@ pub(crate) struct Saving {
     identities: IdentityChanges,
 }
 
-#[derive(Default, Resource)]
+#[derive(Resource)]
 pub(crate) struct Storage {
-    backend: Option<Box<dyn Backend>>,
-    blocked: bool,
+    backend: Box<dyn Backend>,
 }
 
 impl Storage {
-    pub(crate) fn sqlite(path: PathBuf) -> Self {
+    pub(crate) fn sqlite(directory: PathBuf) -> Self {
         Self {
-            backend: Some(Box::new(sqlite::Sqlite::new(path))),
-            blocked: false,
+            backend: Box::new(sqlite::Sqlite::new(directory)),
         }
     }
 
-    pub(crate) fn is_closed(&self) -> bool {
-        self.backend.is_none()
+    pub(crate) fn read(&self, handle: SaveHandle) -> Result<Pending<StoredSave>, Error> {
+        self.backend.read(handle)
     }
 
-    pub(crate) fn close(&mut self) {
-        self.backend = None;
-    }
-
-    pub(crate) fn block_writes(&mut self) {
-        self.blocked = true;
-    }
-
-    pub(crate) fn read(&self) -> Result<Pending<Option<StoredSave>>, Error> {
-        self.backend()?.read()
-    }
-
-    fn backend(&self) -> Result<&dyn Backend, Error> {
-        self.backend.as_deref().ok_or(Error::Closed)
+    pub(crate) fn list(&self) -> Result<Pending<Vec<SaveHandle>>, Error> {
+        self.backend.list()
     }
 }
 
-pub(crate) fn begin_save(world: &mut World) -> Result<Saving, Error> {
-    let storage = world.resource::<Storage>();
-    storage.backend()?;
-    if storage.blocked {
-        return Err(Error::LoadRequired);
-    }
+pub(crate) fn begin_save(world: &mut World, handle: SaveHandle) -> Result<Saving, Error> {
     world.flush();
     world.resource_scope(|world, mut registry: Mut<Registry>| {
         let bundle = capture(world, &mut registry)?;
         let tick = world.read_change_tick();
-        let pending = world.resource::<Storage>().backend()?.commit(bundle)?;
+        let pending = world.resource::<Storage>().backend.commit(handle, bundle)?;
         for entry in &mut registry.entries {
             entry.codec.begin_commit(world);
         }
@@ -232,7 +216,7 @@ fn capture(world: &mut World, registry: &mut Registry) -> Result<SaveBundle, Err
             .collect()
     };
     Ok(SaveBundle {
-        expected_generation: registry.generation,
+        expected_generation: registry.generation.ok_or(Error::Closed)?,
         manifest: registry
             .entries
             .iter()
@@ -251,9 +235,11 @@ fn capture(world: &mut World, registry: &mut Registry) -> Result<SaveBundle, Err
     })
 }
 
-pub(crate) fn can_save(world: &World) -> bool {
-    let storage = world.resource::<Storage>();
-    !storage.is_closed() && !storage.blocked && world.resource::<Registry>().generation.is_some()
+pub(crate) fn start_fresh(world: &mut World) {
+    clear_scope(world);
+    let mut registry = world.resource_mut::<Registry>();
+    registry.started = true;
+    registry.generation = Some(0);
 }
 
 pub(crate) fn clear_scope(world: &mut World) {
@@ -283,20 +269,15 @@ pub(crate) fn clear_scope(world: &mut World) {
             entry.codec.reset(world);
         }
         registry.baseline = false;
+        registry.generation = None;
         registry.rewrite_manifest = false;
     });
 }
 
-pub(crate) fn restore(world: &mut World, saved: Option<&StoredSave>) -> Result<LoadOutcome, Error> {
+pub(crate) fn restore(world: &mut World, saved: &StoredSave) -> Result<(), Error> {
     world.flush();
     world.resource_scope(|world, mut registry: Mut<Registry>| {
         registry.started = true;
-        let Some(saved) = saved else {
-            registry.baseline = false;
-            registry.generation = Some(0);
-            registry.rewrite_manifest = false;
-            return Ok(LoadOutcome::Missing);
-        };
         check_load_manifest(&saved.manifest, &registry)?;
         restore_records(
             world,
@@ -309,7 +290,7 @@ pub(crate) fn restore(world: &mut World, saved: Option<&StoredSave>) -> Result<L
         registry.generation = Some(saved.generation);
         registry.rewrite_manifest = saved.manifest.len() != registry.entries.len();
         world.increment_change_tick();
-        Ok(LoadOutcome::Loaded)
+        Ok(())
     })
 }
 
@@ -456,13 +437,14 @@ mod tests {
     #[test]
     fn commit_uses_captured_records_and_entity_membership() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("save.sqlite");
         let mut app = App::new();
-        app.add_plugins(SavePlugin::sqlite(path))
+        app.add_plugins(SavePlugin::sqlite(directory.path()))
             .persist(component::<Value>("value").capture(Capture::Dirty));
         let world = app.world_mut();
+        let handle = SaveHandle(1);
+        start_fresh(world);
         let removed = world.spawn(Value(1)).id();
-        let mut saving = begin_save(world).unwrap();
+        let mut saving = begin_save(world, handle).unwrap();
         let result = complete(&mut saving.pending);
         saving.finish(world, &result);
         assert_eq!(result.unwrap().generation, 1);
@@ -476,10 +458,10 @@ mod tests {
         world.spawn(Value(3));
 
         let storage = world.resource::<Storage>();
-        let backend = storage.backend().unwrap();
-        let stats = complete(&mut backend.commit(bundle).unwrap()).unwrap();
+        let backend = &storage.backend;
+        let stats = complete(&mut backend.commit(handle, bundle).unwrap()).unwrap();
         assert_eq!((stats.generation, stats.entities, stats.upserts), (2, 1, 1));
-        let saved = complete(&mut backend.read().unwrap()).unwrap().unwrap();
+        let saved = complete(&mut backend.read(handle).unwrap()).unwrap();
         let [(id, bytes)] = saved.records["value"].as_slice() else {
             panic!("expected one saved value");
         };

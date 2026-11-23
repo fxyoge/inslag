@@ -1,11 +1,11 @@
 //! Annotated data and game-specific fresh-world population.
-//! `cargo run --features persistence --example save_slots -- /tmp/slot.sqlite`
+//! `cargo run --features persistence --example save_slots -- /tmp/saves`
 #![cfg(feature = "persistence")]
 use bevy_app::{App, TaskPoolPlugin, Update};
 use bevy_asset::{AssetPlugin, Assets, Handle};
 use bevy_ecs::prelude::*;
 use bevy_time::TimePlugin;
-use inslag_persist::{LoadOutcome, SaveOpened, SavePlugin, SaveRequest, SaveSettings, SaveStatus};
+use inslag_persist::{LoadOutcome, SaveCompleted, SaveOpened, SavePlugin, SaveRequest, SaveStatus};
 use inslag_state_tree::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
@@ -17,7 +17,7 @@ struct Score(u64);
 struct Definition(Handle<StateTreeDefinition>);
 
 fn fresh(status: Res<SaveStatus>, definition: Res<Definition>, mut commands: Commands) {
-    if matches!(status.load(), Some(Ok(LoadOutcome::Missing))) {
+    if matches!(status.load(), Some(Ok(LoadOutcome::Fresh))) {
         commands.insert_resource(Score(10));
         commands.spawn((
             StateTreeInstance::new(definition.0.clone()),
@@ -27,7 +27,7 @@ fn fresh(status: Res<SaveStatus>, definition: Res<Definition>, mut commands: Com
 }
 
 fn main() {
-    let path = std::env::args().nth(1).expect("pass a SQLite slot path");
+    let directory = std::env::args_os().nth(1).expect("pass a save directory");
     let mut app = App::new();
     app.add_plugins((
         TaskPoolPlugin::default(),
@@ -35,8 +35,7 @@ fn main() {
         AssetPlugin::default(),
         StateTreePlugin::new(Update),
     ))
-    .insert_resource(SaveSettings { interval: None }) // Never; manual requests still commit.
-    .add_plugins(SavePlugin::default())
+    .add_plugins(SavePlugin::sqlite(directory))
     .add_systems(SaveOpened, fresh);
     let mut builder = StateTreeBuilder::new("example");
     let root = builder.compound_root("root").unwrap();
@@ -47,8 +46,14 @@ fn main() {
         .resource_mut::<Assets<StateTreeDefinition>>()
         .add(builder.build().unwrap());
     app.insert_resource(Definition(definition));
-    app.world_mut()
-        .write_message(SaveRequest::Open(path.into()));
+    let SaveCompleted::List(saves) = request(&mut app, SaveRequest::List) else {
+        unreachable!()
+    };
+    let saves = saves.unwrap();
+    let open = saves
+        .first()
+        .map_or(SaveRequest::New, |handle| SaveRequest::Load(*handle));
+    app.world_mut().write_message(open);
     app.update();
     settle(&mut app);
     assert!(app.world().resource::<SaveStatus>().can_save());
@@ -64,6 +69,23 @@ fn main() {
             .is_ok()
     );
     println!("saved score {}", app.world().resource::<Score>().0);
+}
+
+fn request(app: &mut App, request: SaveRequest) -> SaveCompleted {
+    let mut cursor = app
+        .world()
+        .resource::<Messages<SaveCompleted>>()
+        .get_cursor_current();
+    app.world_mut().write_message(request);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        app.update();
+        if let Some(completion) = cursor.read(app.world().resource()).next() {
+            return completion.clone();
+        }
+        assert!(Instant::now() < deadline, "persistence did not settle");
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 fn settle(app: &mut App) {

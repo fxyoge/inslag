@@ -19,10 +19,7 @@ struct Sheet {
 fn main() {
     for sheets in [0, 64, 512] {
         let directory = tempfile::tempdir().unwrap();
-        let mut app = app(sheets);
-        app.add_plugins(
-            SavePlugin::sqlite(directory.path().join("profile.sqlite")).load_on_start(false),
-        );
+        let mut app = app(sheets, directory.path());
         app.save_request().unwrap();
         let mut idle = Vec::new();
         let mut saves = Vec::new();
@@ -49,15 +46,17 @@ fn main() {
     }
 }
 
-fn app(sheets: usize) -> App {
+fn app(sheets: usize, directory: &std::path::Path) -> App {
     let mut app = App::new();
     app.add_plugins((
         TaskPoolPlugin::default(),
         TimePlugin,
         AssetPlugin::default(),
         StateTreePlugin::new(Update),
+        SavePlugin::sqlite(directory),
     ))
     .persist_component::<Sheet>("profile.sheet");
+    app.new_request();
     let mut builder = StateTreeBuilder::new("profile-tree");
     let root = builder.compound_root("root").unwrap();
     let idle = builder.atomic("idle", root).unwrap();

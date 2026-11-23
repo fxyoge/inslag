@@ -2,39 +2,41 @@
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_time::{Real, Time, TimePlugin};
-use inslag_persist::{LoadOutcome, SaveOpened, SavePlugin, SaveRequest, SaveSettings, SaveStatus};
+use inslag_persist::{
+    Error, LoadOutcome, SaveCompleted, SaveOpened, SavePlugin, SaveRequest, SaveSettings,
+    SaveStatus,
+};
 use inslag_state_tree::persistence::AppPersistenceExt;
 use serde::{Deserialize, Serialize};
 use std::{
     path::Path,
     time::{Duration, Instant},
 };
+#[path = "../../inslag_persist/tests/support/requests.rs"]
+mod requests;
+use requests::Requests;
 
 #[derive(Resource, Default, Serialize, Deserialize)]
 struct Score(u64);
 #[derive(Resource)]
 struct Ready(bool);
 
-fn app() -> App {
+fn app(directory: &Path) -> App {
     let mut app = App::new();
     app.add_plugins(TimePlugin)
         .insert_resource(Ready(true))
         .init_resource::<Score>()
         .persist_resource::<Score>("score")
-        .add_plugins(SavePlugin::default().enabled_when(|ready: Res<Ready>| ready.0))
+        .add_plugins(SavePlugin::sqlite(directory).enabled_when(|ready: Res<Ready>| ready.0))
         .add_systems(SaveOpened, |world: &mut World| {
             if matches!(
                 world.resource::<SaveStatus>().load(),
-                Some(Ok(LoadOutcome::Missing))
+                Some(Ok(LoadOutcome::Fresh))
             ) {
                 world.insert_resource(Score(10));
             }
         });
     app
-}
-
-fn open(app: &mut App, path: &Path) {
-    request(app, SaveRequest::Open(path.into()));
 }
 
 fn request(app: &mut App, request: SaveRequest) {
@@ -58,16 +60,15 @@ fn settle(app: &mut App) {
 #[test]
 fn never_suppresses_automatic_saves_but_manual_saves_restore_in_a_fresh_app() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("slot.sqlite");
-    let mut first = app();
-    open(&mut first, &path);
+    let mut first = app(directory.path());
+    first.new_request();
     first.world_mut().resource_mut::<Score>().0 = 93;
     first
         .world_mut()
         .resource_mut::<Time<Real>>()
         .advance_by(Duration::from_secs(3600));
     first.update();
-    assert!(!path.exists());
+    assert!(first.list_request().unwrap().is_empty());
     request(&mut first, SaveRequest::Save);
     assert!(
         first
@@ -77,8 +78,9 @@ fn never_suppresses_automatic_saves_but_manual_saves_restore_in_a_fresh_app() {
             .unwrap()
             .is_ok()
     );
-    let mut second = app();
-    open(&mut second, &path);
+    let mut second = app(directory.path());
+    let saves = second.list_request().unwrap();
+    second.load_request(saves[0]).unwrap();
     assert!(matches!(
         second.world().resource::<SaveStatus>().load(),
         Some(Ok(LoadOutcome::Loaded))
@@ -89,9 +91,8 @@ fn never_suppresses_automatic_saves_but_manual_saves_restore_in_a_fresh_app() {
 #[test]
 fn settings_changes_reset_deadlines_and_never_cancels_an_existing_deadline() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("slot.sqlite");
-    let mut app = app();
-    open(&mut app, &path);
+    let mut app = app(directory.path());
+    let save = app.new_request();
     app.world_mut().resource_mut::<SaveSettings>().interval = Some(Duration::from_secs(10));
     app.update();
     app.world_mut()
@@ -99,7 +100,7 @@ fn settings_changes_reset_deadlines_and_never_cancels_an_existing_deadline() {
         .advance_by(Duration::from_secs(11));
     app.update();
     settle(&mut app);
-    assert!(path.exists());
+    assert_eq!(app.list_request().unwrap(), [save]);
     let generation = app
         .world()
         .resource::<SaveStatus>()
@@ -127,62 +128,34 @@ fn settings_changes_reset_deadlines_and_never_cancels_an_existing_deadline() {
 }
 
 #[test]
-fn failed_outgoing_save_preserves_session_and_blocks_close_and_slot_switch() {
+fn caller_can_discard_a_session_after_a_failed_save() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("first.sqlite");
-    let other = directory.path().join("second.sqlite");
-    let mut app = app();
-    open(&mut app, &path);
+    let mut app = app(directory.path());
+    let save = app.new_request();
+    app.world_mut().resource_mut::<Score>().0 = 21;
+    app.save_request().unwrap();
     app.world_mut().resource_mut::<Score>().0 = 42;
     app.world_mut().resource_mut::<Ready>().0 = false;
-    request(&mut app, SaveRequest::Close);
-    assert_eq!(app.world().resource::<Score>().0, 42);
-    request(&mut app, SaveRequest::Open(other));
-    assert_eq!(
-        app.world().resource::<SaveStatus>().path(),
-        Some(path.as_path())
-    );
-    assert_eq!(app.world().resource::<Score>().0, 42);
-    app.world_mut().resource_mut::<Ready>().0 = true;
-    request(&mut app, SaveRequest::Close);
-    assert_eq!(app.world().resource::<SaveStatus>().path(), None);
-    let mut restored = self::app();
-    open(&mut restored, &path);
-    assert_eq!(restored.world().resource::<Score>().0, 42);
-}
-
-#[test]
-fn broken_destination_retains_outgoing_world_and_original_save_path() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("first.sqlite");
-    let broken = directory.path().join("broken.sqlite");
-    std::fs::write(&broken, b"not a database").unwrap();
-    let mut app = app();
-    open(&mut app, &path);
-    app.world_mut().resource_mut::<Score>().0 = 21;
-    request(&mut app, SaveRequest::Open(broken.clone()));
     assert!(
-        app.world()
-            .resource::<SaveStatus>()
-            .load()
-            .unwrap()
-            .is_err()
+        app.save_request()
+            .is_err_and(|error| matches!(*error, Error::NotReady))
     );
-    assert_eq!(
-        app.world().resource::<SaveStatus>().path(),
-        Some(path.as_path())
-    );
-    assert_eq!(app.world().resource::<Score>().0, 21);
-    assert_eq!(std::fs::read(broken).unwrap(), b"not a database");
+    assert_eq!(app.world().resource::<Score>().0, 42);
+    assert!(matches!(app.request(SaveRequest::New),
+        SaveCompleted::New(Err(error)) if matches!(*error, Error::AlreadyOpen)));
+    app.close_request();
+    assert_eq!(app.world().resource::<SaveStatus>().handle(), None);
+    let mut restored = self::app(directory.path());
+    restored.load_request(save).unwrap();
+    assert_eq!(restored.world().resource::<Score>().0, 21);
 }
 
 #[test]
 fn a_caller_can_save_before_exiting_without_autosave() {
     use bevy_app::AppExit;
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("exit.sqlite");
-    let mut app = app();
-    open(&mut app, &path);
+    let mut app = app(directory.path());
+    let save = app.new_request();
     app.world_mut().resource_mut::<Score>().0 = 83;
     request(&mut app, SaveRequest::Save);
     assert_eq!(
@@ -198,9 +171,8 @@ fn a_caller_can_save_before_exiting_without_autosave() {
     app.world_mut().write_message(AppExit::Success);
     app.update();
     assert!(app.should_exit().is_some());
-    assert!(path.exists());
-    let mut restored = self::app();
-    open(&mut restored, &path);
+    let mut restored = self::app(directory.path());
+    restored.load_request(save).unwrap();
     assert_eq!(restored.world().resource::<Score>().0, 83);
 }
 
@@ -216,8 +188,7 @@ fn preparation_commands_get_a_normal_cleanup_frame_before_capture() {
         bevy_ecs::entity::EntityHashMap<()>,
     );
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("prepared.sqlite");
-    let mut app = app();
+    let mut app = app(directory.path());
     app.persist_component::<Owner>("owner")
         .persist_resource::<Owners>("owners")
         .init_resource::<Owners>()
@@ -237,13 +208,18 @@ fn preparation_commands_get_a_normal_cleanup_frame_before_capture() {
                 }
             },
         );
-    open(&mut app, &path);
+    app.new_request();
     let owner = app.world_mut().spawn(Owner).id();
     app.world_mut()
         .insert_resource(Owners([(owner, ())].into()));
     app.world_mut().write_message(SaveRequest::Save);
     app.update();
-    assert!(!path.exists());
+    assert!(
+        std::fs::read_dir(directory.path())
+            .unwrap()
+            .next()
+            .is_none()
+    );
     assert!(app.world().resource::<SaveStatus>().is_saving());
     app.world_mut().write_message(SaveRequest::Save);
     app.update();

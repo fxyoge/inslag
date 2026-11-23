@@ -3698,6 +3698,7 @@ dependencies = [
  "bevy_time",
  "bevy_transform",
  "divan",
+ "getrandom",
  "inslag_persist_macros",
  "inventory",
  "rusqlite",

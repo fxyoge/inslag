@@ -21,7 +21,7 @@
 //!     Suite::new(env!("CARGO_MANIFEST_DIR"), |app, writable| {
 //!         app.add_plugins((
 //!             StateTreePlugin::new(Update),
-//!             SavePlugin::sqlite(writable.join("save.sqlite")),
+//!             SavePlugin::sqlite(writable.join("saves")),
 //!         ));
 //!     })
 //!     .run(path);

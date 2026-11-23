@@ -1,4 +1,4 @@
-//! cargo run -p inslag_persist --example headless -- /tmp/opencode/inslag-persist-example.sqlite
+//! cargo run -p inslag_persist --example headless -- /tmp/opencode/inslag-persist-example
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use bevy_time::TimePlugin;
@@ -28,7 +28,7 @@ struct Account {
 struct Transient;
 
 fn fresh(status: Res<SaveStatus>) -> bool {
-    matches!(status.load(), Some(Ok(LoadOutcome::Missing)))
+    matches!(status.load(), Some(Ok(LoadOutcome::Fresh)))
 }
 
 fn initialize(mut commands: Commands) {
@@ -48,7 +48,7 @@ fn main() {
     let path = std::env::args_os()
         .nth(1)
         .map(PathBuf::from)
-        .unwrap_or_else(|| "save.sqlite".into());
+        .unwrap_or_else(|| "saves".into());
     let mut app = App::new();
     app.add_plugins(TimePlugin);
     let plugin = SavePlugin::sqlite(&path).autosave(Duration::from_millis(250));
@@ -65,10 +65,11 @@ fn main() {
         .add_systems(SaveOpened, initialize.run_if(fresh))
         .add_systems(Update, simulate);
     app.world_mut().spawn(Transient);
+    app.world_mut().write_message(SaveRequest::New);
     app.update();
     settle(&mut app);
     let status = app.world().resource::<SaveStatus>();
-    println!("{:?}: {:?}", status.path(), status.load());
+    println!("{:?}: {:?}", status.handle(), status.load());
     if !status.can_save() {
         std::process::exit(1);
     }

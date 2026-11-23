@@ -1,8 +1,10 @@
-use super::{Backend, Error, Pending, SaveBundle, SaveStats, StoredSave};
+use super::{Backend, Error, Pending, SaveBundle, SaveHandle, SaveStats, StoredSave};
 use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use std::{
     collections::BTreeMap,
-    path::PathBuf,
+    fs,
+    io::ErrorKind,
+    path::{Path, PathBuf},
     sync::{Mutex, mpsc},
     thread,
     time::Duration,
@@ -18,11 +20,16 @@ impl From<rusqlite::Error> for Error {
 }
 
 pub(super) struct Sqlite {
-    path: PathBuf,
+    directory: PathBuf,
     worker: Mutex<Option<mpsc::Sender<Job>>>,
 }
 
-type Job = Box<dyn FnOnce(&mut Database) + Send>;
+type Job = Box<dyn FnOnce(&mut Collection) + Send>;
+
+struct Collection {
+    directory: PathBuf,
+    database: Option<(SaveHandle, Database)>,
+}
 
 struct Database {
     path: PathBuf,
@@ -30,31 +37,31 @@ struct Database {
 }
 
 impl Sqlite {
-    pub(super) fn new(path: PathBuf) -> Self {
+    pub(super) fn new(directory: PathBuf) -> Self {
         Self {
-            path,
+            directory,
             worker: Mutex::default(),
         }
     }
 
     fn submit<T: Send + 'static>(
         &self,
-        operation: impl FnOnce(&mut Database) -> Result<T, Error> + Send + 'static,
+        operation: impl FnOnce(&mut Collection) -> Result<T, Error> + Send + 'static,
     ) -> Result<Pending<T>, Error> {
         let mut worker = self.worker.lock().expect("worker poisoned");
         if worker.is_none() {
             let (send, receive) = mpsc::channel::<Job>();
-            let path = self.path.clone();
+            let directory = self.directory.clone();
             thread::Builder::new()
                 .name("inslag-sqlite".into())
                 .spawn(move || {
                     // Closing the last connection can itself write to SQLite's WAL.
-                    let mut database = Database {
-                        path,
-                        connection: None,
+                    let mut collection = Collection {
+                        directory,
+                        database: None,
                     };
                     for job in receive {
-                        job(&mut database);
+                        job(&mut collection);
                     }
                 })?;
             *worker = Some(send);
@@ -72,13 +79,90 @@ impl Sqlite {
 }
 
 impl Backend for Sqlite {
-    fn commit(&self, bundle: SaveBundle) -> Result<Pending<SaveStats>, Error> {
-        self.submit(move |database| database.commit(bundle))
+    fn commit(&self, handle: SaveHandle, bundle: SaveBundle) -> Result<Pending<SaveStats>, Error> {
+        self.submit(move |collection| {
+            if bundle.expected_generation == 0 {
+                fs::create_dir_all(&collection.directory)?;
+            }
+            collection.database(handle).commit(bundle)
+        })
     }
 
-    fn read(&self) -> Result<Pending<Option<StoredSave>>, Error> {
-        self.submit(Database::read)
+    fn read(&self, handle: SaveHandle) -> Result<Pending<StoredSave>, Error> {
+        self.submit(move |collection| collection.database(handle).read())
     }
+
+    fn list(&self) -> Result<Pending<Vec<SaveHandle>>, Error> {
+        self.submit(|collection| list(&collection.directory))
+    }
+}
+
+impl Collection {
+    fn database(&mut self, handle: SaveHandle) -> &mut Database {
+        if self
+            .database
+            .as_ref()
+            .is_none_or(|(active, _)| *active != handle)
+        {
+            self.database = Some((
+                handle,
+                Database {
+                    path: self.directory.join(format!("{:032x}.sqlite", handle.0)),
+                    connection: None,
+                },
+            ));
+        }
+        &mut self.database.as_mut().expect("selected database").1
+    }
+}
+
+fn list(directory: &Path) -> Result<Vec<SaveHandle>, Error> {
+    let files = match fs::read_dir(directory) {
+        Ok(files) => files,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut saves = Vec::new();
+    for entry in files {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(stem) = name.to_str().and_then(|name| name.strip_suffix(".sqlite")) else {
+            continue;
+        };
+        if stem.len() != 32
+            || !stem
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            || !entry.file_type()?.is_file()
+        {
+            continue;
+        }
+        let mut connection =
+            Connection::open_with_flags(entry.path(), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let transaction = connection.transaction()?;
+        let application: i64 =
+            transaction.query_row("PRAGMA application_id", [], |row| row.get(0))?;
+        if application == 0 {
+            // A first write can leave an empty database before it commits.
+            continue;
+        }
+        check_format(&transaction, application)?;
+        if generation(&transaction)? != 0 {
+            saves.push(SaveHandle(
+                u128::from_str_radix(stem, 16).expect("validated handle"),
+            ));
+        }
+    }
+    saves.sort_unstable();
+    Ok(saves)
+}
+
+fn check_format(connection: &Connection, application: i64) -> Result<(), Error> {
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if application != APPLICATION_ID || version != FORMAT {
+        return Err(Error::Format);
+    }
+    Ok(())
 }
 
 impl Database {
@@ -132,12 +216,8 @@ impl Database {
                      CREATE INDEX entity_refs_target ON entity_refs(target);"
                 )?;
                 transaction.commit()?;
-            } else if application != APPLICATION_ID {
-                return Err(Error::Format);
-            }
-            let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-            if version != FORMAT {
-                return Err(Error::Format);
+            } else {
+                check_format(&connection, application)?;
             }
             connection.busy_timeout(Duration::from_secs(5))?;
             let journal: String =
@@ -157,14 +237,11 @@ impl Database {
             .upserts
             .sort_unstable_by(|a, b| (a.id, a.key).cmp(&(b.id, b.key)));
         let transaction = self
-            .connection(true)?
+            .connection(bundle.expected_generation == 0)?
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous = generation(&transaction)?;
-        let expected = bundle.expected_generation.unwrap_or(0);
+        let expected = bundle.expected_generation;
         if expected != previous as u64 {
-            if bundle.expected_generation.is_none() {
-                return Err(Error::LoadRequired);
-            }
             return Err(Error::Conflict {
                 expected,
                 actual: previous as u64,
@@ -246,18 +323,16 @@ impl Database {
         })
     }
 
-    fn read(&mut self) -> Result<Option<StoredSave>, Error> {
-        if self.connection.is_none() {
-            match std::fs::metadata(&self.path) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                Err(error) => return Err(error.into()),
-                Ok(_) => {}
-            }
+    fn read(&mut self) -> Result<StoredSave, Error> {
+        match fs::metadata(&self.path) {
+            Err(error) if error.kind() == ErrorKind::NotFound => return Err(Error::NotFound),
+            Err(error) => return Err(error.into()),
+            Ok(_) => {}
         }
         let transaction = self.connection(false)?.transaction()?;
         let saved_generation = generation(&transaction)?;
         if saved_generation == 0 {
-            return Ok(None);
+            return Err(Error::NotFound);
         }
         let manifest = read_manifest(&transaction)?;
         let entities = transaction
@@ -285,12 +360,12 @@ impl Database {
             }
         }
         transaction.commit()?;
-        Ok(Some(StoredSave {
+        Ok(StoredSave {
             generation: saved_generation as u64,
             entities,
             records,
             manifest,
-        }))
+        })
     }
 }
 

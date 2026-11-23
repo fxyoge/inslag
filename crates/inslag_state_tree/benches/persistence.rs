@@ -30,10 +30,17 @@ fn restore_datamodel(bencher: Bencher<'_, '_>, instances: usize) {
             let directory = tempfile::tempdir().unwrap();
             let mut benchmark = benchmark(instances, &directory);
             benchmark.app.save_request().unwrap();
-            (benchmark, directory)
+            let handle = benchmark
+                .app
+                .world()
+                .resource::<inslag_persist::SaveStatus>()
+                .handle()
+                .unwrap();
+            benchmark.app.close_request();
+            (benchmark, directory, handle)
         })
-        .bench_local_values(|(mut benchmark, directory)| {
-            benchmark.app.load_request().unwrap();
+        .bench_local_values(|(mut benchmark, directory, handle)| {
+            benchmark.app.load_request(handle).unwrap();
             benchmark.run_schedule();
             divan::black_box((benchmark, directory))
         });
@@ -43,7 +50,8 @@ fn benchmark(instances: usize, directory: &tempfile::TempDir) -> BenchmarkApp {
     let mut benchmark = BenchmarkApp::empty(support::activity_definition(), Executor::Parallel);
     benchmark
         .app
-        .add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")).load_on_start(false));
+        .add_plugins(SavePlugin::sqlite(directory.path()));
+    benchmark.app.new_request();
     benchmark.register_benchmark_activity();
     benchmark.spawn_instances(instances);
     benchmark

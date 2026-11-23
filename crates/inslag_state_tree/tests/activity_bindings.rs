@@ -509,7 +509,8 @@ fn restore_reconstructs_bindings_without_a_lifecycle_queue() {
     use requests::Requests;
     let directory = tempfile::tempdir().unwrap();
     let mut app = app();
-    app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")).load_on_start(false));
+    app.add_plugins(SavePlugin::sqlite(directory.path()));
+    app.new_request();
     app.add_state_tree_activity(
         Activity::<Work>::new("work")
             .with_collection()
@@ -533,7 +534,7 @@ fn restore_reconstructs_bindings_without_a_lifecycle_queue() {
         .unwrap()
         .amount = 99;
     app.save_request().unwrap();
-    app.load_request().unwrap();
+    app.reload().unwrap();
     app.update();
     let (owner, runs) = app
         .world_mut()

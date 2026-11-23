@@ -1,13 +1,14 @@
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_transform::components::Transform;
-use inslag_persist::{Error, LoadOutcome, SavePlugin, SaveRequest, SaveStatus, save};
+use inslag_persist::{Error, SavePlugin, SaveRequest, SaveStatus, save};
 use serde::{Deserialize, Serialize};
 mod support;
 use support::settle;
 #[path = "support/requests.rs"]
 mod requests;
-use requests::Requests;
+use requests::{Requests, only_file};
+use std::path::Path;
 
 #[save(resource, key = "tiny.score")]
 #[derive(Resource, Default, Serialize, Deserialize)]
@@ -34,10 +35,10 @@ struct Actor {
     peer: Entity,
 }
 
-fn app() -> App {
+fn app(directory: &Path) -> App {
     let mut app = App::new();
     app.insert_resource(Platform(17, 0))
-        .add_plugins(SavePlugin::default());
+        .add_plugins(SavePlugin::sqlite(directory));
     app.update();
     app
 }
@@ -50,11 +51,9 @@ fn request(app: &mut App, request: SaveRequest) {
 #[test]
 fn annotated_game_needs_only_the_plugin_for_fresh_restore_switch_and_close() {
     let directory = tempfile::tempdir().unwrap();
-    let a = directory.path().join("a.sqlite");
-    let b = directory.path().join("b.sqlite");
-    let mut first = app();
+    let mut first = app(directory.path());
     assert_eq!(first.world().resource::<SessionSeed>().0, 17);
-    request(&mut first, SaveRequest::Open(a.clone()));
+    let a = first.new_request();
     first.world_mut().resource_mut::<Score>().0 = 42;
     let actor = first
         .world_mut()
@@ -78,8 +77,8 @@ fn annotated_game_needs_only_the_plugin_for_fresh_restore_switch_and_close() {
             .is_ok()
     );
 
-    let mut second = app();
-    request(&mut second, SaveRequest::Open(a.clone()));
+    let mut second = app(directory.path());
+    second.load_request(a).unwrap();
     assert_eq!(second.world().resource::<Score>().0, 42);
     let (entity, restored_actor, name, transform) = second
         .world_mut()
@@ -89,7 +88,8 @@ fn annotated_game_needs_only_the_plugin_for_fresh_restore_switch_and_close() {
     assert_eq!(entity, restored_actor.peer);
     assert_eq!(name.as_str(), "actor");
     assert_eq!(transform.translation.x, 1.);
-    request(&mut first, SaveRequest::Open(b));
+    first.close_request();
+    first.new_request();
     assert_eq!(first.world().resource::<Score>().0, 0);
     assert!(first.world().get_entity(actor).is_err());
     assert!(first.world().get_entity(camera).is_ok());
@@ -97,39 +97,39 @@ fn annotated_game_needs_only_the_plugin_for_fresh_restore_switch_and_close() {
     request(&mut first, SaveRequest::Close);
     assert_eq!(first.world().resource::<Score>().0, 0);
     assert_eq!(first.world().resource::<SessionSeed>().0, 17);
-    request(&mut first, SaveRequest::Open(a));
+    first.load_request(a).unwrap();
     assert_eq!(first.world().resource::<Score>().0, 42);
 }
 
 #[test]
 fn failed_restore_leaves_resources_and_entities_intact_without_running_constructors() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut app = app();
-    request(&mut app, SaveRequest::Open(path.clone()));
+    let mut writer = app(directory.path());
+    let handle = writer.new_request();
+    writer.save_request().unwrap();
+    let mut app = app(directory.path());
     app.world_mut().resource_mut::<Score>().0 = 29;
     app.world_mut().resource_mut::<SessionSeed>().0 = 123;
     let actor = app.world_mut().spawn_empty().id();
     app.world_mut()
         .entity_mut(actor)
         .insert(Actor { peer: actor });
-    app.save_request().unwrap();
     let count = app.world().entities().len();
     let constructors = app.world().resource::<Platform>().1;
-    rusqlite::Connection::open(path)
+    rusqlite::Connection::open(only_file(directory.path()))
         .unwrap()
         .execute(
             "UPDATE records SET payload = ?1 WHERE type_key = 'tiny.score'",
             [b"invalid".as_slice()],
         )
         .unwrap();
-    assert!(matches!(
-        app.load_request(),
-        Err(Error::Decode {
+    assert!(app.load_request(handle).is_err_and(|error| matches!(
+        *error,
+        Error::Decode {
             key: "tiny.score",
             ..
-        })
-    ));
+        }
+    )));
     assert_eq!(app.world().resource::<Score>().0, 29);
     assert_eq!(app.world().resource::<SessionSeed>().0, 123);
     assert!(app.world().get::<Actor>(actor).is_some());
@@ -142,13 +142,12 @@ fn finishing_a_deferred_open_never_creates_an_unscheduled_save() {
     #[derive(Resource)]
     struct AssetsReady(bool);
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("deferred.sqlite");
+    let path = directory.path().join("saves");
     let mut app = App::new();
     app.insert_resource(Platform(17, 0))
         .insert_resource(AssetsReady(false))
-        .add_plugins(SavePlugin::default().enabled_when(|ready: Res<AssetsReady>| ready.0));
-    app.world_mut()
-        .write_message(SaveRequest::Open(path.clone()));
+        .add_plugins(SavePlugin::sqlite(&path).enabled_when(|ready: Res<AssetsReady>| ready.0));
+    app.world_mut().write_message(SaveRequest::New);
     app.update();
     assert!(app.world().resource::<SaveStatus>().is_loading());
     app.world_mut().resource_mut::<AssetsReady>().0 = true;
@@ -160,14 +159,14 @@ fn finishing_a_deferred_open_never_creates_an_unscheduled_save() {
 }
 
 #[test]
-fn load_request_initializes_fresh_resources() {
+fn new_initializes_fresh_resources() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("direct.sqlite");
+    let path = directory.path().join("saves");
     let mut app = App::new();
     app.insert_resource(Platform(17, 0))
-        .add_plugins(SavePlugin::sqlite(&path).load_on_start(false))
+        .add_plugins(SavePlugin::sqlite(&path))
         .insert_resource(Score(99));
-    assert_eq!(app.load_request().unwrap(), LoadOutcome::Missing);
+    app.new_request();
     assert_eq!(app.world().resource::<Score>().0, 0);
     assert_eq!(app.world().resource::<SessionSeed>().0, 17);
     assert_eq!(app.world().resource::<Platform>().1, 1);

@@ -1,9 +1,9 @@
-use bevy_app::{App, AppExit, Startup, Update};
+use bevy_app::{App, AppExit, Update};
 use bevy_ecs::{prelude::*, system::RunSystemOnce};
 use bevy_time::{Real, Time};
 use inslag_persist::{
-    AppSaveExt, Capture, Dirty, Error, LoadOutcome, SaveOpened, SavePlugin, SaveRequest,
-    SaveStatus, component,
+    AppSaveExt, Capture, Dirty, Error, LoadOutcome, SaveCompleted, SaveOpened, SavePlugin,
+    SaveRequest, SaveStatus, component,
 };
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ mod support;
 use support::settle;
 #[path = "support/requests.rs"]
 mod requests;
-use requests::Requests;
+use requests::{Requests, only_file};
 
 #[derive(Resource, Default, Serialize, Deserialize)]
 struct Counter(u64);
@@ -30,18 +30,8 @@ struct Peer {
 #[derive(Component)]
 struct Transient;
 
-#[derive(Resource, Default, Serialize, Deserialize)]
-struct Fallible(#[serde(serialize_with = "fallible")] bool);
-
-fn fallible<S: serde::Serializer>(value: &bool, serializer: S) -> Result<S::Ok, S::Error> {
-    if !value {
-        return Err(serde::ser::Error::custom("injected encoding failure"));
-    }
-    serializer.serialize_bool(*value)
-}
-
 fn fresh(status: Res<SaveStatus>) -> bool {
-    matches!(status.load(), Some(Ok(LoadOutcome::Missing)))
+    matches!(status.load(), Some(Ok(LoadOutcome::Fresh)))
 }
 
 fn initialize(mut commands: Commands) {
@@ -91,29 +81,24 @@ fn generation(path: &Path) -> i64 {
 #[test]
 fn plugin_restores_before_save_opened_and_autosaves_deferred_mutations() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut first = app(&path);
+    let mut first = app(directory.path());
     let transient = first.world_mut().spawn(Transient).id();
     first.update();
-    settle(&mut first);
+    let handle = first.new_request();
     assert!(first.world().resource::<SaveStatus>().can_save());
-    assert!(!path.exists());
+    assert!(first.list_request().unwrap().is_empty());
     first.add_systems(Update, |mut commands: Commands| {
         commands.insert_resource(Counter(42));
     });
     tick(&mut first, Duration::from_secs(1));
-    assert_eq!(generation(&path), 1);
+    assert_eq!(generation(&only_file(directory.path())), 1);
     assert!(first.world().get::<Transient>(transient).is_some());
-    let mut second = app(&path);
-    second
-        .add_systems(Startup, |status: Res<SaveStatus>| {
-            assert!(status.is_loading())
-        })
-        .add_systems(SaveOpened, |counter: Res<Counter>| {
-            assert_eq!(counter.0, 42)
-        });
+    let mut second = app(directory.path());
+    second.add_systems(SaveOpened, |counter: Res<Counter>| {
+        assert_eq!(counter.0, 42)
+    });
     second.update();
-    settle(&mut second);
+    second.load_request(handle).unwrap();
     assert!(matches!(
         second.world().resource::<SaveStatus>().load(),
         Some(Ok(LoadOutcome::Loaded))
@@ -134,10 +119,10 @@ fn plugin_restores_before_save_opened_and_autosaves_deferred_mutations() {
 #[test]
 fn readiness_and_real_elapsed_deadlines_control_saves_without_frame_retries() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
+    let path = directory.path().join("saves");
     let mut app = app(&path);
     app.update();
-    settle(&mut app);
+    app.new_request();
     app.world_mut().resource_mut::<Ready>().0 = false;
     tick(&mut app, Duration::from_secs(1));
     assert!(!path.exists());
@@ -154,6 +139,7 @@ fn readiness_and_real_elapsed_deadlines_control_saves_without_frame_retries() {
     }
     assert!(!path.exists());
     tick(&mut app, Duration::from_secs(10));
+    let path = only_file(&path);
     assert_eq!(generation(&path), 1); // one commit, not ten catch-up commits
     for _ in 0..100 {
         app.update();
@@ -164,11 +150,11 @@ fn readiness_and_real_elapsed_deadlines_control_saves_without_frame_retries() {
 #[test]
 fn failed_load_stays_protected_across_autosave_deadlines_and_explicit_requests() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut first = app(&path);
+    let mut first = app(directory.path());
     first.update();
-    settle(&mut first);
+    let handle = first.new_request();
     request(&mut first, SaveRequest::Save);
+    let path = only_file(directory.path());
     let connection = Connection::open(&path).unwrap();
     connection
         .execute(
@@ -176,10 +162,10 @@ fn failed_load_stays_protected_across_autosave_deadlines_and_explicit_requests()
             [],
         )
         .unwrap();
-    let mut second = app(&path);
+    let mut second = app(directory.path());
     second.insert_resource(Counter(99));
     second.update();
-    settle(&mut second);
+    assert!(second.load_request(handle).is_err());
     assert!(
         second
             .world()
@@ -191,7 +177,11 @@ fn failed_load_stays_protected_across_autosave_deadlines_and_explicit_requests()
     for _ in 0..10 {
         tick(&mut second, Duration::from_secs(1));
     }
-    request(&mut second, SaveRequest::Save);
+    assert!(
+        second
+            .save_request()
+            .is_err_and(|error| matches!(*error, Error::Closed))
+    );
     assert_eq!(generation(&path), 1);
     assert_eq!(second.world().resource::<Counter>().0, 99);
     assert!(!second.world().resource::<SaveStatus>().can_save());
@@ -201,119 +191,110 @@ fn failed_load_stays_protected_across_autosave_deadlines_and_explicit_requests()
             [b"23".to_vec()],
         )
         .unwrap();
-    request(&mut second, SaveRequest::Load);
+    second.load_request(handle).unwrap();
     assert_eq!(second.world().resource::<Counter>().0, 23);
     tick(&mut second, Duration::from_secs(1));
     assert_eq!(generation(&path), 2);
 }
 
 #[test]
-fn session_switches_and_close_isolate_files_and_preserve_unrelated_entities() {
+fn explicit_session_switches_isolate_saves_and_preserve_unrelated_entities() {
     let directory = tempfile::tempdir().unwrap();
-    let a = directory.path().join("a.sqlite");
-    let b = directory.path().join("b.sqlite");
-    let mut app = app(&a);
+    let mut app = app(directory.path());
     let transient = app.world_mut().spawn(Transient).id();
     app.update();
-    settle(&mut app);
+    let a = app.new_request();
     app.world_mut().resource_mut::<Counter>().0 = 31;
-    request(&mut app, SaveRequest::Open(b.clone()));
-    assert_eq!(generation(&a), 1);
+    app.save_request().unwrap();
+    app.close_request();
+    let b = app.new_request();
+    assert_ne!(a, b);
     assert_eq!(app.world().resource::<Counter>().0, 10); // fresh, not copied from A
     app.world_mut().resource_mut::<Counter>().0 = 52;
-    request(&mut app, SaveRequest::Open(a.clone()));
-    assert_eq!(app.world().resource::<Counter>().0, 31);
-    request(&mut app, SaveRequest::Open(b.clone()));
+    assert_eq!(app.list_request().unwrap(), [a]);
     assert_eq!(app.world().resource::<Counter>().0, 52);
-    request(&mut app, SaveRequest::Close);
+    app.save_request().unwrap();
+    assert_eq!(app.list_request().unwrap().len(), 2);
+    app.close_request();
+    app.load_request(a).unwrap();
+    assert_eq!(app.world().resource::<Counter>().0, 31);
+    app.close_request();
+    app.load_request(b).unwrap();
+    assert_eq!(app.world().resource::<Counter>().0, 52);
+    app.close_request();
     assert_eq!(app.world().resource::<Counter>().0, 0);
     assert_eq!(
         app.world_mut().query::<&Peer>().iter(app.world()).count(),
         0
     );
     assert!(app.world().get::<Transient>(transient).is_some());
-    assert!(matches!(app.save_request(), Err(Error::Closed)));
-    request(&mut app, SaveRequest::Open(b)); // reopening the same path works
+    assert!(
+        app.save_request()
+            .is_err_and(|error| matches!(*error, Error::Closed))
+    );
+    app.load_request(b).unwrap();
     assert_eq!(app.world().resource::<Counter>().0, 52);
 }
 
 #[test]
-fn failed_outgoing_save_keeps_session_and_pending_changes_for_retry() {
+fn failed_save_keeps_session_and_pending_changes_for_retry() {
     let directory = tempfile::tempdir().unwrap();
-    let a = directory.path().join("a.sqlite");
-    let b = directory.path().join("b.sqlite");
-    let mut app = app(&a);
-    app.update();
-    settle(&mut app);
-    request(&mut app, SaveRequest::Save);
+    let mut app = app(directory.path());
+    let handle = app.new_request();
+    app.save_request().unwrap();
+    let path = only_file(directory.path());
     app.world_mut().resource_mut::<Counter>().0 = 88;
-    let connection = Connection::open(&a).unwrap();
+    let connection = Connection::open(&path).unwrap();
     connection.execute_batch("CREATE TRIGGER reject_commit BEFORE UPDATE ON meta BEGIN SELECT RAISE(ABORT, 'failure'); END;").unwrap();
-    request(&mut app, SaveRequest::Open(b.clone()));
-    assert_eq!(
-        app.world().resource::<SaveStatus>().path(),
-        Some(a.as_path())
-    );
+    assert!(app.save_request().is_err());
+    assert_eq!(app.world().resource::<SaveStatus>().handle(), Some(handle));
     assert_eq!(app.world().resource::<Counter>().0, 88);
-    assert!(!b.exists());
-    assert_eq!(generation(&a), 1);
+    assert_eq!(generation(&path), 1);
     // Frames before the next deadline must not retry the failed operation.
     for _ in 0..10 {
         app.update();
     }
-    assert_eq!(generation(&a), 1);
+    assert_eq!(generation(&path), 1);
     connection
         .execute_batch("DROP TRIGGER reject_commit")
         .unwrap();
-    request(&mut app, SaveRequest::Open(b));
-    assert_eq!(generation(&a), 2);
-    let mut restored = self::app(&a);
-    restored.update();
-    settle(&mut restored);
+    app.save_request().unwrap();
+    assert_eq!(generation(&path), 2);
+    let mut restored = self::app(directory.path());
+    restored.load_request(handle).unwrap();
     assert_eq!(restored.world().resource::<Counter>().0, 88);
 }
 
 #[test]
-fn corrupt_destination_keeps_original_session_and_never_writes_destination() {
+fn new_and_load_reject_an_open_session_without_writing() {
     let directory = tempfile::tempdir().unwrap();
-    let a = directory.path().join("a.sqlite");
-    let b = directory.path().join("b.sqlite");
-    let mut target = app(&b);
-    target.update();
-    settle(&mut target);
-    request(&mut target, SaveRequest::Save);
-    let connection = Connection::open(&b).unwrap();
-    connection
-        .execute(
-            "UPDATE records SET payload = X'00' WHERE type_key = 'counter'",
-            [],
-        )
-        .unwrap();
-    let mut app = app(&a);
-    app.update();
-    settle(&mut app);
+    let mut app = app(directory.path());
+    let target = app.new_request();
+    app.save_request().unwrap();
+    app.close_request();
+    let active = app.new_request();
     app.world_mut().resource_mut::<Counter>().0 = 77;
-    request(&mut app, SaveRequest::Open(b.clone()));
-    assert_eq!(
-        app.world().resource::<SaveStatus>().path(),
-        Some(a.as_path())
+    assert!(matches!(app.request(SaveRequest::New),
+        SaveCompleted::New(Err(error)) if matches!(*error, Error::AlreadyOpen)));
+    assert!(
+        app.load_request(target)
+            .is_err_and(|error| matches!(*error, Error::AlreadyOpen))
     );
+    assert_eq!(app.world().resource::<SaveStatus>().handle(), Some(active));
     assert!(app.world().resource::<SaveStatus>().can_save());
     assert_eq!(app.world().resource::<Counter>().0, 77);
-    for _ in 0..3 {
-        tick(&mut app, Duration::from_secs(1));
-    }
-    assert_eq!(generation(&b), 1);
-    assert_eq!(generation(&a), 4);
+    app.close_request();
+    assert_eq!(app.list_request().unwrap(), [target]);
+    assert_eq!(generation(&only_file(directory.path())), 1);
 }
 
 #[test]
 fn exit_passes_through_without_saving_an_open_session() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
+    let path = directory.path().join("saves");
     let mut app = app(&path);
     app.update();
-    settle(&mut app);
+    app.new_request();
     app.world_mut().resource_mut::<Counter>().0 = 64;
     app.world_mut().write_message(AppExit::Success);
     app.update();
@@ -323,49 +304,43 @@ fn exit_passes_through_without_saving_an_open_session() {
 }
 
 #[test]
-fn only_the_first_request_in_a_batch_runs() {
+fn a_batch_reports_busy_requests_without_silently_discarding_them() {
     let directory = tempfile::tempdir().unwrap();
-    let a = directory.path().join("a.sqlite");
-    let b = directory.path().join("b.sqlite");
-    let mut app = App::new();
-    app.add_plugins(SavePlugin::sqlite(&a).load_on_start(false))
-        .persist_resource::<Counter>("counter")
-        .add_systems(
-            SaveOpened,
-            (|mut commands: Commands| {
-                commands.insert_resource(Counter(5));
-            })
-            .run_if(fresh),
-        );
-    app.update();
-    assert!(app.world().resource::<SaveStatus>().load().is_none());
-    app.world_mut().write_message(SaveRequest::Open(b.clone()));
+    let mut app = app(directory.path());
+    let mut cursor = app
+        .world()
+        .resource::<Messages<SaveCompleted>>()
+        .get_cursor_current();
+    app.world_mut().write_message(SaveRequest::New);
     app.world_mut().write_message(SaveRequest::Save);
     app.world_mut().write_message(SaveRequest::Close);
     app.update();
-    settle(&mut app);
-    let status = app.world().resource::<SaveStatus>();
-    assert_eq!(status.path(), Some(b.as_path()));
-    assert!(status.can_save());
-    assert!(!a.exists());
-    assert!(!b.exists());
+    let results: Vec<_> = cursor.read(app.world().resource()).collect();
+    assert!(matches!(results.as_slice(), [
+        SaveCompleted::New(Ok(_)),
+        SaveCompleted::Save { automatic: false, result: Err(save) },
+        SaveCompleted::Close(Err(close)),
+    ] if matches!(**save, Error::Busy) && matches!(**close, Error::Busy)));
+    assert!(app.list_request().unwrap().is_empty());
     assert_eq!(app.save_request().unwrap().generation, 1);
 }
 
 #[test]
 fn saving_during_an_open_is_busy_and_is_not_retried() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
+    let path = directory.path().join("saves");
     let mut app = app(&path);
     app.world_mut().resource_mut::<Ready>().0 = false;
+    app.world_mut().write_message(SaveRequest::New);
     app.update();
     assert!(app.world().resource::<SaveStatus>().is_loading());
-    app.world_mut().write_message(SaveRequest::Save);
-    app.update();
-    let status = app.world().resource::<SaveStatus>();
-    assert!(matches!(status.last_save(), Some(Err(Error::Busy))));
+    assert!(
+        app.save_request()
+            .is_err_and(|error| matches!(*error, Error::Busy))
+    );
+    assert!(app.list_request().unwrap().is_empty());
     app.world_mut().resource_mut::<Ready>().0 = true;
-    request(&mut app, SaveRequest::Save);
+    settle(&mut app);
     assert!(app.world().resource::<SaveStatus>().can_save());
     assert!(!path.exists());
     assert_eq!(app.save_request().unwrap().generation, 1);
@@ -374,9 +349,13 @@ fn saving_during_an_open_is_busy_and_is_not_retried() {
 #[test]
 fn exit_without_opening_a_session_does_not_create_a_save() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
+    let path = directory.path().join("saves");
     let mut app = App::new();
-    app.add_plugins(SavePlugin::sqlite(&path).load_on_start(false));
+    app.add_plugins(SavePlugin::sqlite(&path));
+    app.update();
+    assert!(app.world().resource::<SaveStatus>().handle().is_none());
+    assert!(!path.exists());
+    assert!(app.list_request().unwrap().is_empty());
     app.world_mut().write_message(AppExit::Success);
     app.update();
     assert!(!path.exists());
@@ -384,51 +363,41 @@ fn exit_without_opening_a_session_does_not_create_a_save() {
 }
 
 #[test]
-fn readiness_blocks_session_switch_and_a_due_autosave_does_not_duplicate_a_request() {
+fn a_due_autosave_does_not_duplicate_an_explicit_save() {
     let directory = tempfile::tempdir().unwrap();
-    let a = directory.path().join("a.sqlite");
-    let b = directory.path().join("b.sqlite");
-    let mut app = app(&a);
+    let mut app = app(directory.path());
     app.update();
-    settle(&mut app);
-    app.world_mut().resource_mut::<Ready>().0 = false;
-    request(&mut app, SaveRequest::Open(b.clone()));
-    assert_eq!(
-        app.world().resource::<SaveStatus>().path(),
-        Some(a.as_path())
-    );
-    assert!(!b.exists());
-    assert!(!a.exists());
-    app.world_mut().resource_mut::<Ready>().0 = true;
+    app.new_request();
     app.world_mut().write_message(SaveRequest::Save);
     tick(&mut app, Duration::from_secs(1));
-    assert_eq!(generation(&a), 1);
+    assert_eq!(generation(&only_file(directory.path())), 1);
 }
 
 #[test]
-fn a_failed_first_save_cannot_be_discarded_by_switching_files() {
+fn list_returns_committed_handles_and_ignores_unfinished_databases() {
     let directory = tempfile::tempdir().unwrap();
-    let a = directory.path().join("a.sqlite");
-    let b = directory.path().join("b.sqlite");
-    let mut app = App::new();
-    app.add_plugins(SavePlugin::sqlite(&a).load_on_start(false))
-        .persist_resource::<Fallible>("fallible")
-        .insert_resource(Fallible(false));
-    assert!(matches!(app.save_request(), Err(Error::Encode { .. })));
-    request(&mut app, SaveRequest::Open(b.clone()));
-    assert_eq!(
-        app.world().resource::<SaveStatus>().path(),
-        Some(a.as_path())
-    );
-    assert!(!app.world().resource::<Fallible>().0);
-    assert!(!b.exists());
-    app.world_mut().resource_mut::<Fallible>().0 = true;
-    request(&mut app, SaveRequest::Open(b.clone()));
-    assert_eq!(generation(&a), 1);
-    assert_eq!(
-        app.world().resource::<SaveStatus>().path(),
-        Some(b.as_path())
-    );
+    let mut writer = app(directory.path());
+    let committed = writer.new_request();
+    writer.world_mut().resource_mut::<Counter>().0 = 81;
+    writer.save_request().unwrap();
+    let unfinished = directory
+        .path()
+        .join("00000000000000000000000000000000.sqlite");
+    let connection = Connection::open(unfinished).unwrap();
+    connection
+        .execute_batch(
+            "PRAGMA application_id = 1195984705; PRAGMA user_version = 1;
+         CREATE TABLE meta (singleton INTEGER PRIMARY KEY, generation INTEGER);
+         INSERT INTO meta VALUES (1, 0);",
+        )
+        .unwrap();
+    std::fs::write(directory.path().join("notes.txt"), b"not a save").unwrap();
+    let mut reader = app(directory.path());
+    let handles = reader.list_request().unwrap();
+    assert_eq!(handles, [committed]);
+    assert_eq!(reader.world().resource::<SaveStatus>().handle(), None);
+    reader.load_request(handles[0]).unwrap();
+    assert_eq!(reader.world().resource::<Counter>().0, 81);
 }
 
 #[derive(Component, Serialize, Deserialize)]
@@ -441,18 +410,19 @@ struct ChangedValue(u64);
 fn edits_during_sqlite_commit_survive_success_and_rollback() {
     for abort in [false, true] {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("save.sqlite");
         let mut app = App::new();
-        app.add_plugins(SavePlugin::sqlite(&path).load_on_start(false))
+        app.add_plugins(SavePlugin::sqlite(directory.path()))
             .persist_resource::<Counter>("counter")
             .persist(component::<DirtyValue>("dirty").capture(Capture::Dirty))
             .persist(component::<ChangedValue>("changed").capture(Capture::Changed));
         app.update();
+        app.new_request();
         let world = app.world_mut();
         let edited = world.spawn((DirtyValue(1), ChangedValue(4))).id();
         let readded = world.spawn(DirtyValue(7)).id();
         let captured_only = world.spawn(DirtyValue(10)).id();
         assert_eq!(app.save_request().unwrap().generation, 1);
+        let path = only_file(directory.path());
         let connection = Connection::open(&path).unwrap();
         if abort {
             connection.execute_batch("CREATE TRIGGER reject_commit BEFORE UPDATE ON meta BEGIN SELECT RAISE(ABORT, 'failure'); END;").unwrap();
@@ -510,32 +480,31 @@ fn edits_during_sqlite_commit_survive_success_and_rollback() {
 }
 
 #[test]
-fn close_requested_during_a_save_waits_and_captures_newer_edits() {
+fn close_during_a_commit_is_busy_then_closes_without_writing_newer_edits() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut app = app(&path);
+    let mut app = app(directory.path());
     app.update();
-    settle(&mut app);
+    app.new_request();
     request(&mut app, SaveRequest::Save);
+    let path = only_file(directory.path());
     let connection = Connection::open(&path).unwrap();
     connection.execute_batch("BEGIN IMMEDIATE").unwrap();
     app.world_mut().write_message(SaveRequest::Save);
     app.update();
 
     app.world_mut().resource_mut::<Counter>().0 = 55;
-    app.world_mut().write_message(SaveRequest::Close);
-    app.update();
+    assert!(matches!(app.request(SaveRequest::Close),
+        SaveCompleted::Close(Err(error)) if matches!(*error, Error::Busy)));
     assert!(app.world().resource::<SaveStatus>().is_saving());
     assert_eq!(app.world().resource::<Counter>().0, 55);
     connection.execute_batch("COMMIT").unwrap();
     settle(&mut app);
 
-    assert_eq!(saved_values(&connection, "counter"), [10]);
-    app.update();
-    settle(&mut app);
-    assert!(app.world().resource::<SaveStatus>().path().is_none());
+    app.close_request();
+    assert!(app.world().resource::<SaveStatus>().handle().is_none());
     assert_eq!(app.world().resource::<Counter>().0, 0);
-    assert_eq!(saved_values(&connection, "counter"), [55]);
+    assert_eq!(saved_values(&connection, "counter"), [10]);
+    assert_eq!(generation(&path), 2);
 }
 
 fn edit_dirty(world: &mut World, entity: Entity, value: u64) {

@@ -1,36 +1,23 @@
 use bevy_app::{Last, PreStartup};
 use bevy_time::{Real, Time};
+use std::path::{Path, PathBuf};
 
 use super::*;
-use crate::lifecycle::{
-    CheckReadiness, SaveSession, has_work, initial_load, process, update_interval,
-};
+use crate::lifecycle::{CheckReadiness, SaveSession, has_work, process, update_interval};
 
-#[derive(Default)]
 pub struct SavePlugin {
-    path: Option<PathBuf>,
-    load_on_start: bool,
+    directory: PathBuf,
     interval: Option<Duration>,
     readiness: Option<ConfigureReadiness>,
 }
 
 impl SavePlugin {
-    /// Open a SQLite save at startup, or start fresh if the file does not exist.
-    pub fn sqlite(path: impl AsRef<Path>) -> Self {
+    pub fn sqlite(directory: impl AsRef<Path>) -> Self {
         Self {
-            path: Some(path.as_ref().to_owned()),
-            load_on_start: true,
+            directory: directory.as_ref().to_owned(),
             interval: None,
             readiness: None,
         }
-    }
-
-    /// Load the configured file at startup. Enabled by default.
-    ///
-    /// Set this to `false` to load it later with [`SaveRequest::Load`].
-    pub fn load_on_start(mut self, enabled: bool) -> Self {
-        self.load_on_start = enabled;
-        self
     }
 
     /// Save at a real-time interval, even while the simulation is paused.
@@ -44,7 +31,7 @@ impl SavePlugin {
 
     /// Allow loading and saving only while this condition is true.
     ///
-    /// Use this to wait for assets or other setup. A failed load still blocks saving.
+    /// Use this to wait for assets or other setup.
     pub fn enabled_when<M>(
         mut self,
         condition: impl SystemCondition<M> + Clone + Send + Sync + 'static,
@@ -61,14 +48,10 @@ impl SavePlugin {
 
 impl Plugin for SavePlugin {
     fn build(&self, app: &mut App) {
-        let storage = self
-            .path
-            .clone()
-            .map_or_else(storage::Storage::default, storage::Storage::sqlite);
         app.init_resource::<identity::Identities>()
             .init_resource::<registration::Registry>()
-            .insert_resource(SaveStatus::new(self.path.clone()))
-            .insert_resource(storage);
+            .init_resource::<SaveStatus>()
+            .insert_resource(storage::Storage::sqlite(self.directory.clone()));
         assert!(
             self.interval.is_none() || app.world().contains_resource::<Time<Real>>(),
             "autosave requires TimePlugin before SavePlugin"
@@ -80,9 +63,10 @@ impl Plugin for SavePlugin {
             .configure_sets(SaveOpened, (SaveSet::Rebuild, SaveSet::Ready).chain())
             .configure_sets(SaveClosed, (SaveSet::Rebuild, SaveSet::Ready).chain())
             .add_message::<SaveRequest>()
+            .add_message::<SaveCompleted>()
             .init_resource::<SaveSettings>()
             .insert_resource(SaveSession::default())
-            .add_systems(PreStartup, registration::initialize.before(SaveSet::Load))
+            .add_systems(PreStartup, registration::initialize)
             .add_systems(
                 Last,
                 (
@@ -96,9 +80,6 @@ impl Plugin for SavePlugin {
             app.insert_resource(SaveSettings {
                 interval: self.interval,
             });
-        }
-        if self.load_on_start {
-            app.add_systems(PreStartup, initial_load.in_set(SaveSet::Load));
         }
         app.persist(component::<bevy_ecs::name::Name>("bevy.name").attached())
             .persist(

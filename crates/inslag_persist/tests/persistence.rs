@@ -1,12 +1,12 @@
 use bevy_app::App;
 use bevy_ecs::{entity::MapEntities, prelude::*, system::RunSystemOnce};
-use inslag_persist::{AppSaveExt, Capture, Dirty, Error, LoadOutcome, SavePlugin, component};
+use inslag_persist::{AppSaveExt, Capture, Dirty, Error, SavePlugin, component};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 #[path = "support/requests.rs"]
 mod requests;
-use requests::Requests;
+use requests::{Requests, only_file};
 
 const STRATEGIES: [Capture; 3] = [Capture::Snapshot, Capture::Changed, Capture::Dirty];
 
@@ -41,8 +41,8 @@ fn mark<T: Component>(world: &mut World, entity: Entity) {
 fn strategies_restore_identical_state_and_preserve_unrelated_data() {
     for strategy in STRATEGIES {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("save.sqlite");
-        let mut app = app(&path, strategy);
+        let mut app = app(directory.path(), strategy);
+        let handle = app.new_request();
         let first = app
             .world_mut()
             .spawn((Position { name: 1, value: 10 }, Label("one".into())))
@@ -78,12 +78,12 @@ fn strategies_restore_identical_state_and_preserve_unrelated_data() {
         let expected = positions(app.world_mut());
         app.world_mut().get_mut::<Position>(first).unwrap().value = 999;
         app.insert_resource(Clock(999));
-        app.load_request().unwrap();
+        app.reload().unwrap();
         assert_eq!(positions(app.world_mut()), expected);
         assert_eq!(*app.world().resource::<Clock>(), Clock(8));
         assert!(app.world().get::<Unrelated>(unrelated).is_some());
-        let mut fresh = self::app(&path, strategy);
-        fresh.load_request().unwrap();
+        let mut fresh = self::app(directory.path(), strategy);
+        fresh.load_request(handle).unwrap();
         assert_eq!(positions(fresh.world_mut()), expected);
         assert_eq!(*fresh.world().resource::<Clock>(), Clock(8));
         assert_eq!(fresh.save_request().unwrap().generation, 3);
@@ -93,8 +93,9 @@ fn strategies_restore_identical_state_and_preserve_unrelated_data() {
 #[test]
 fn changed_ticks_are_relative_to_commits_not_frames_or_world_clear_trackers() {
     let directory = tempfile::tempdir().unwrap();
-    let mut app = app(&directory.path().join("save.sqlite"), Capture::Changed);
+    let mut app = app(directory.path(), Capture::Changed);
     app.update();
+    app.new_request();
     app.world_mut().remove_resource::<Clock>();
     let entity = app.world_mut().spawn(Position { name: 1, value: 1 }).id();
     assert_eq!(app.save_request().unwrap().upserts, 1);
@@ -113,7 +114,9 @@ fn changed_ticks_are_relative_to_commits_not_frames_or_world_clear_trackers() {
 #[test]
 fn dirty_marks_coalesce_and_insert_replacements_are_automatic() {
     let directory = tempfile::tempdir().unwrap();
-    let mut app = app(&directory.path().join("save.sqlite"), Capture::Dirty);
+    let mut app = app(directory.path(), Capture::Dirty);
+    app.new_request();
+    app.world_mut().remove_resource::<Clock>();
     let entity = app.world_mut().spawn(Position { name: 1, value: 1 }).id();
     app.save_request().unwrap();
     app.world_mut().get_mut::<Position>(entity).unwrap().value = 2;
@@ -133,20 +136,21 @@ fn dirty_marks_coalesce_and_insert_replacements_are_automatic() {
         .entity_mut(entity)
         .insert(Position { name: 1, value: 4 });
     assert_eq!(app.save_request().unwrap().upserts, 1);
-    app.load_request().unwrap();
+    app.reload().unwrap();
     assert_eq!(positions(app.world_mut()), [Position { name: 1, value: 4 }]);
 }
 
 #[test]
 fn missing_resources_remove_the_persisted_value_and_restore_absence() {
     let directory = tempfile::tempdir().unwrap();
-    let mut app = app(&directory.path().join("save.sqlite"), Capture::Dirty);
+    let mut app = app(directory.path(), Capture::Dirty);
+    app.new_request();
     app.insert_resource(Clock(4));
     app.save_request().unwrap();
     app.world_mut().remove_resource::<Clock>();
     assert_eq!(app.save_request().unwrap().deletions, 1);
     app.insert_resource(Clock(99));
-    app.load_request().unwrap();
+    app.reload().unwrap();
     assert!(!app.world().contains_resource::<Clock>());
 }
 
@@ -158,21 +162,21 @@ fn newly_registered_resources_default_but_saved_absence_stays_absent() {
     }
 
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut source = app(&path, Capture::Changed);
+    let mut source = app(directory.path(), Capture::Changed);
+    let handle = source.new_request();
     source.world_mut().remove_resource::<Clock>();
     source.save_request().unwrap();
-    let mut target = app(&path, Capture::Changed);
+    let mut target = app(directory.path(), Capture::Changed);
     target
         .persist_resource::<Settings>("settings")
         .insert_resource(Settings { enabled: true });
-    target.load_request().unwrap();
+    target.load_request(handle).unwrap();
     assert!(!target.world().resource::<Settings>().enabled);
     assert!(!target.world().contains_resource::<Clock>());
     target.save_request().unwrap();
-    let mut reloaded = app(&path, Capture::Changed);
+    let mut reloaded = app(directory.path(), Capture::Changed);
     reloaded.persist_resource::<Settings>("settings");
-    reloaded.load_request().unwrap();
+    reloaded.load_request(handle).unwrap();
     assert!(!reloaded.world().resource::<Settings>().enabled);
     assert!(!reloaded.world().contains_resource::<Clock>());
 }
@@ -185,13 +189,14 @@ fn filtered_membership_changes_are_detected_without_marking_payloads() {
     for strategy in STRATEGIES {
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new();
-        app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")))
+        app.add_plugins(SavePlugin::sqlite(directory.path()))
             .persist(
                 component::<Position>("position")
                     .filter::<With<Selected>>()
                     .capture(strategy),
             )
             .persist(component::<Selected>("selected"));
+        app.new_request();
         let entity = app.world_mut().spawn(Position { name: 1, value: 10 }).id();
         assert_eq!(app.save_request().unwrap().entities, 0);
         app.world_mut().entity_mut(entity).insert(Selected);
@@ -202,7 +207,7 @@ fn filtered_membership_changes_are_detected_without_marking_payloads() {
         assert_eq!((stats.entities, stats.deletions), (0, 2));
         app.world_mut().entity_mut(entity).insert(Selected);
         app.save_request().unwrap();
-        app.load_request().unwrap();
+        app.reload().unwrap();
         assert_eq!(
             positions(app.world_mut()),
             [Position { name: 1, value: 10 }]
@@ -222,7 +227,9 @@ fn disabled_entities_are_persisted_consistently_by_every_strategy() {
     use bevy_ecs::entity_disabling::Disabled;
     for strategy in STRATEGIES {
         let directory = tempfile::tempdir().unwrap();
-        let mut app = app(&directory.path().join("save.sqlite"), strategy);
+        let mut app = app(directory.path(), strategy);
+        app.new_request();
+        app.world_mut().remove_resource::<Clock>();
         let entity = app
             .world_mut()
             .spawn((Position { name: 1, value: 4 }, Disabled))
@@ -231,7 +238,7 @@ fn disabled_entities_are_persisted_consistently_by_every_strategy() {
         app.world_mut().get_mut::<Position>(entity).unwrap().value = 5;
         mark::<Position>(app.world_mut(), entity);
         assert_eq!(app.save_request().unwrap().upserts, 1);
-        app.load_request().unwrap();
+        app.reload().unwrap();
         assert_eq!(positions(app.world_mut()), [Position { name: 1, value: 5 }]);
     }
 }
@@ -267,7 +274,7 @@ fn graph_app(path: &Path, strategy: Capture) -> App {
 
 fn app(path: &Path, strategy: Capture) -> App {
     let mut app = App::new();
-    app.add_plugins(SavePlugin::sqlite(path).load_on_start(false))
+    app.add_plugins(SavePlugin::sqlite(path))
         .persist(component::<Position>("position").capture(strategy))
         .persist(component::<Label>("label").capture(strategy))
         .persist_resource::<Clock>("clock");
@@ -278,8 +285,8 @@ fn app(path: &Path, strategy: Capture) -> App {
 fn cyclic_entity_graphs_and_resource_references_remap_across_apps() {
     for strategy in STRATEGIES {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("save.sqlite");
-        let mut writer = graph_app(&path, strategy);
+        let mut writer = graph_app(directory.path(), strategy);
+        let handle = writer.new_request();
         let a = writer
             .world_mut()
             .spawn(Position { name: 1, value: 10 })
@@ -292,11 +299,11 @@ fn cyclic_entity_graphs_and_resource_references_remap_across_apps() {
         writer.world_mut().entity_mut(b).insert(Link { target: a });
         writer.insert_resource(Focus { target: a });
         writer.save_request().unwrap();
-        let mut reader = graph_app(&path, strategy);
+        let mut reader = graph_app(directory.path(), strategy);
         for _ in 0..100 {
             reader.world_mut().spawn(Unrelated);
         }
-        reader.load_request().unwrap();
+        reader.load_request(handle).unwrap();
         let mut query = reader.world_mut().query::<(Entity, &Position, &Link)>();
         let nodes: Vec<_> = query
             .iter(reader.world())
@@ -306,6 +313,7 @@ fn cyclic_entity_graphs_and_resource_references_remap_across_apps() {
         let b = nodes.iter().find(|(_, name, _)| *name == 2).unwrap();
         assert_eq!((a.2, b.2), (b.0, a.0));
         assert_eq!(reader.world().resource::<Focus>().target, a.0);
+        let path = only_file(directory.path());
         let before: Vec<u8> = Connection::open(&path)
             .unwrap()
             .query_row(
@@ -331,8 +339,9 @@ fn cyclic_entity_graphs_and_resource_references_remap_across_apps() {
 fn untouched_references_prevent_incremental_target_deletion() {
     for strategy in [Capture::Changed, Capture::Dirty] {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("save.sqlite");
-        let mut writer = graph_app(&path, strategy);
+        let mut writer = graph_app(directory.path(), strategy);
+        let handle = writer.new_request();
+        writer.world_mut().remove_resource::<Focus>();
         let a = writer
             .world_mut()
             .spawn(Position { name: 1, value: 1 })
@@ -345,8 +354,8 @@ fn untouched_references_prevent_incremental_target_deletion() {
         writer.save_request().unwrap();
         writer.world_mut().despawn(b);
         assert!(writer.save_request().is_err());
-        let mut reader = graph_app(&path, strategy);
-        reader.load_request().unwrap();
+        let mut reader = graph_app(directory.path(), strategy);
+        reader.load_request(handle).unwrap();
         assert_eq!(positions(reader.world_mut()).len(), 2);
         writer.world_mut().entity_mut(a).remove::<Link>();
         let retry = writer.save_request().unwrap();
@@ -360,12 +369,21 @@ fn untouched_references_prevent_incremental_target_deletion() {
 #[test]
 fn references_outside_selection_fail_without_creating_a_save() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut app = graph_app(&path, Capture::Snapshot);
+    let mut app = graph_app(directory.path(), Capture::Snapshot);
+    app.new_request();
+    app.world_mut().remove_resource::<Focus>();
     let outside = app.world_mut().spawn(Unrelated).id();
     app.world_mut().spawn(Link { target: outside });
-    assert!(matches!(app.save_request(), Err(Error::Encode { .. })));
-    assert!(!path.exists());
+    assert!(
+        app.save_request()
+            .is_err_and(|error| matches!(*error, Error::Encode { .. }))
+    );
+    assert!(
+        std::fs::read_dir(directory.path())
+            .unwrap()
+            .next()
+            .is_none()
+    );
     app.world_mut()
         .entity_mut(outside)
         .insert(Position { name: 1, value: 2 });
@@ -375,21 +393,25 @@ fn references_outside_selection_fail_without_creating_a_save() {
 #[test]
 fn decode_failure_preserves_the_entire_live_scope() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut app = app(&path, Capture::Changed);
-    let entity = app.world_mut().spawn(Position { name: 1, value: 1 }).id();
-    app.insert_resource(Clock(1));
-    app.save_request().unwrap();
-    let connection = Connection::open(&path).unwrap();
+    let mut writer = app(directory.path(), Capture::Changed);
+    let handle = writer.new_request();
+    writer.world_mut().spawn(Position { name: 1, value: 1 });
+    writer.insert_resource(Clock(1));
+    writer.save_request().unwrap();
+    let connection = Connection::open(only_file(directory.path())).unwrap();
     connection
         .execute(
             "UPDATE records SET payload = ?1 WHERE type_key = 'clock'",
             [b"invalid".to_vec()],
         )
         .unwrap();
-    app.world_mut().get_mut::<Position>(entity).unwrap().value = 42;
+    let mut app = app(directory.path(), Capture::Changed);
+    let entity = app.world_mut().spawn(Position { name: 1, value: 42 }).id();
     app.insert_resource(Clock(42));
-    assert!(matches!(app.load_request(), Err(Error::Decode { .. })));
+    assert!(
+        app.load_request(handle)
+            .is_err_and(|error| matches!(*error, Error::Decode { .. }))
+    );
     assert_eq!(app.world().get::<Position>(entity).unwrap().value, 42);
     assert_eq!(*app.world().resource::<Clock>(), Clock(42));
 }
@@ -397,21 +419,31 @@ fn decode_failure_preserves_the_entire_live_scope() {
 #[test]
 fn dangling_reference_decode_fails_before_entities_are_replaced() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut app = graph_app(&path, Capture::Dirty);
-    let entity = app.world_mut().spawn(Position { name: 1, value: 1 }).id();
-    app.world_mut()
+    let mut writer = graph_app(directory.path(), Capture::Dirty);
+    let handle = writer.new_request();
+    writer.world_mut().remove_resource::<Focus>();
+    let entity = writer
+        .world_mut()
+        .spawn(Position { name: 1, value: 1 })
+        .id();
+    writer
+        .world_mut()
         .entity_mut(entity)
         .insert(Link { target: entity });
-    app.save_request().unwrap();
-    Connection::open(&path)
+    writer.save_request().unwrap();
+    Connection::open(only_file(directory.path()))
         .unwrap()
         .execute(
             "UPDATE records SET payload = ?1 WHERE type_key = 'link'",
             [br#"{"target":999999}"#.to_vec()],
         )
         .unwrap();
-    assert!(matches!(app.load_request(), Err(Error::Decode { .. })));
+    let mut app = graph_app(directory.path(), Capture::Dirty);
+    let entity = app.world_mut().spawn(Position { name: 1, value: 42 }).id();
+    assert!(
+        app.load_request(handle)
+            .is_err_and(|error| matches!(*error, Error::Decode { .. }))
+    );
     assert!(app.world().get::<Position>(entity).is_some());
 }
 
@@ -419,14 +451,15 @@ fn dangling_reference_decode_fails_before_entities_are_replaced() {
 fn sqlite_failure_rolls_back_prior_writes_and_preserves_pending_changes() {
     for strategy in STRATEGIES {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("save.sqlite");
-        let mut writer = app(&path, strategy);
+        let mut writer = app(directory.path(), strategy);
+        let handle = writer.new_request();
+        writer.world_mut().remove_resource::<Clock>();
         let entity = writer
             .world_mut()
             .spawn((Position { name: 1, value: 1 }, Label("old".into())))
             .id();
         writer.save_request().unwrap();
-        let connection = Connection::open(&path).unwrap();
+        let connection = Connection::open(only_file(directory.path())).unwrap();
         connection
             .execute_batch(
                 "CREATE TRIGGER reject_label BEFORE UPDATE ON records WHEN NEW.type_key = 'label'
@@ -442,12 +475,13 @@ fn sqlite_failure_rolls_back_prior_writes_and_preserves_pending_changes() {
         mark::<Position>(writer.world_mut(), entity);
         mark::<Label>(writer.world_mut(), entity);
         let error = writer.save_request().unwrap_err();
-        assert!(matches!(error, Error::Io(_)));
+        assert!(matches!(*error, Error::Io(_)));
         assert!(
-            std::error::Error::source(error).is_some_and(|source| source.is::<rusqlite::Error>())
+            std::error::Error::source(error.as_ref())
+                .is_some_and(|source| source.is::<rusqlite::Error>())
         );
-        let mut reader = app(&path, strategy);
-        reader.load_request().unwrap();
+        let mut reader = app(directory.path(), strategy);
+        reader.load_request(handle).unwrap();
         assert_eq!(
             positions(reader.world_mut()),
             [Position { name: 1, value: 1 }]
@@ -457,7 +491,7 @@ fn sqlite_failure_rolls_back_prior_writes_and_preserves_pending_changes() {
             .unwrap();
         let retry = writer.save_request().unwrap();
         assert_eq!((retry.generation, retry.upserts), (2, 2));
-        reader.load_request().unwrap();
+        reader.reload().unwrap();
         assert_eq!(
             positions(reader.world_mut()),
             [Position { name: 1, value: 2 }]
@@ -491,16 +525,20 @@ fn serialize_fallible<S: serde::Serializer>(value: &u64, serializer: S) -> Resul
 fn encoding_failure_does_not_acknowledge_dirty_marks() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = App::new();
-    app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")))
+    app.add_plugins(SavePlugin::sqlite(directory.path()))
         .persist(component::<Fallible>("fallible").capture(Capture::Dirty));
+    app.new_request();
     let entity = app.world_mut().spawn(Fallible { value: 1 }).id();
     app.save_request().unwrap();
     app.world_mut().get_mut::<Fallible>(entity).unwrap().value = u64::MAX;
     mark::<Fallible>(app.world_mut(), entity);
-    assert!(matches!(app.save_request(), Err(Error::Encode { .. })));
+    assert!(
+        app.save_request()
+            .is_err_and(|error| matches!(*error, Error::Encode { .. }))
+    );
     app.world_mut().get_mut::<Fallible>(entity).unwrap().value = 2;
     assert_eq!(app.save_request().unwrap().upserts, 1);
-    app.load_request().unwrap();
+    app.reload().unwrap();
     assert_eq!(
         app.world_mut()
             .query::<&Fallible>()
@@ -514,43 +552,57 @@ fn encoding_failure_does_not_acknowledge_dirty_marks() {
 #[test]
 fn concurrent_writer_requires_reloading_before_incremental_save() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut a = app(&path, Capture::Changed);
+    let mut a = app(directory.path(), Capture::Changed);
+    let handle = a.new_request();
     a.world_mut().spawn(Position { name: 1, value: 1 });
     a.save_request().unwrap();
-    let mut b = app(&path, Capture::Changed);
-    b.load_request().unwrap();
+    let mut b = app(directory.path(), Capture::Changed);
+    b.load_request(handle).unwrap();
     a.save_request().unwrap();
-    assert!(matches!(
-        b.save_request(),
-        Err(Error::Conflict {
+    assert!(b.save_request().is_err_and(|error| matches!(
+        *error,
+        Error::Conflict {
             expected: 1,
             actual: 2
-        })
-    ));
-    b.load_request().unwrap();
+        }
+    )));
+    b.reload().unwrap();
     assert_eq!(b.save_request().unwrap().generation, 3);
 }
 
 #[test]
 fn wrong_manifest_and_foreign_databases_are_rejected() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut writer = app(&path, Capture::Snapshot);
+    let mut writer = app(directory.path(), Capture::Snapshot);
+    let handle = writer.new_request();
     writer.save_request().unwrap();
     let mut different = App::new();
     different
-        .add_plugins(SavePlugin::sqlite(&path))
+        .add_plugins(SavePlugin::sqlite(directory.path()))
         .persist(component::<Position>("renamed"));
-    assert!(matches!(different.load_request(), Err(Error::Manifest)));
-    assert!(matches!(different.save_request(), Err(Error::LoadRequired)));
-    let foreign = directory.path().join("foreign.sqlite");
-    let connection = Connection::open(&foreign).unwrap();
+    assert!(
+        different
+            .load_request(handle)
+            .is_err_and(|error| matches!(*error, Error::Manifest))
+    );
+    assert!(
+        different
+            .save_request()
+            .is_err_and(|error| matches!(*error, Error::Closed))
+    );
+    let path = only_file(directory.path());
+    let foreign = tempfile::tempdir().unwrap();
+    let foreign_path = foreign.path().join(path.file_name().unwrap());
+    let connection = Connection::open(foreign_path).unwrap();
     connection
         .execute_batch("CREATE TABLE important(value INTEGER); INSERT INTO important VALUES (123);")
         .unwrap();
-    let mut writer = app(&foreign, Capture::Snapshot);
-    assert!(matches!(writer.save_request(), Err(Error::Format)));
+    let mut reader = app(foreign.path(), Capture::Snapshot);
+    assert!(
+        reader
+            .load_request(handle)
+            .is_err_and(|error| matches!(*error, Error::Format))
+    );
     let value: i64 = connection
         .query_row("SELECT value FROM important", [], |row| row.get(0))
         .unwrap();
@@ -560,20 +612,24 @@ fn wrong_manifest_and_foreign_databases_are_rejected() {
 #[test]
 fn mismatched_manifest_roles_preserve_live_state() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut app = app(&path, Capture::Changed);
-    let entity = app.world_mut().spawn(Position { name: 1, value: 10 }).id();
-    app.insert_resource(Clock(7));
-    app.save_request().unwrap();
-    Connection::open(&path)
+    let mut writer = app(directory.path(), Capture::Changed);
+    let handle = writer.new_request();
+    writer.world_mut().spawn(Position { name: 1, value: 10 });
+    writer.insert_resource(Clock(7));
+    writer.save_request().unwrap();
+    Connection::open(only_file(directory.path()))
         .unwrap()
         .execute("UPDATE types SET kind = 0 WHERE key = 'position'", [])
         .unwrap();
 
-    app.world_mut().get_mut::<Position>(entity).unwrap().value = 42;
+    let mut app = app(directory.path(), Capture::Changed);
+    let entity = app.world_mut().spawn(Position { name: 1, value: 42 }).id();
     app.insert_resource(Clock(42));
     let count = app.world().entities().len();
-    assert!(matches!(app.load_request(), Err(Error::Manifest)));
+    assert!(
+        app.load_request(handle)
+            .is_err_and(|error| matches!(*error, Error::Manifest))
+    );
     assert_eq!(app.world().get::<Position>(entity).unwrap().value, 42);
     assert_eq!(app.world().resource::<Clock>().0, 42);
     assert_eq!(app.world().entities().len(), count);
@@ -582,48 +638,43 @@ fn mismatched_manifest_roles_preserve_live_state() {
 #[test]
 fn missing_file_load_does_not_create_it() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("missing.sqlite");
+    let path = directory.path().join("missing");
     let mut app = app(&path, Capture::Snapshot);
-    assert_eq!(app.load_request().unwrap(), LoadOutcome::Missing);
-    assert!(!path.exists());
-}
-
-#[test]
-fn first_save_in_a_new_app_cannot_replace_the_old_scope() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut first = app(&path, Capture::Dirty);
-    first.world_mut().spawn(Position { name: 1, value: 1 });
-    first.save_request().unwrap();
-    let mut second = app(&path, Capture::Dirty);
-    second.world_mut().spawn(Position { name: 2, value: 2 });
-    assert!(matches!(second.save_request(), Err(Error::LoadRequired)));
-    first.load_request().unwrap();
-    assert_eq!(
-        positions(first.world_mut()),
-        [Position { name: 1, value: 1 }]
+    let handle = app.new_request();
+    app.close_request();
+    assert!(
+        app.load_request(handle)
+            .is_err_and(|error| matches!(*error, Error::NotFound))
     );
-    second.load_request().unwrap();
-    assert_eq!(second.save_request().unwrap().generation, 2);
+    assert!(!path.exists());
 }
 
 #[test]
 fn failed_load_blocks_writes_until_a_successful_reload() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut writer = app(&path, Capture::Changed);
+    let mut writer = app(directory.path(), Capture::Changed);
+    let handle = writer.new_request();
     writer.insert_resource(Clock(7));
     writer.save_request().unwrap();
-    let connection = Connection::open(&path).unwrap();
+    writer.close_request();
+    let connection = Connection::open(only_file(directory.path())).unwrap();
     connection
         .execute(
             "UPDATE records SET payload = X'00' WHERE type_key = 'clock'",
             [],
         )
         .unwrap();
-    assert!(matches!(writer.load_request(), Err(Error::Decode { .. })));
+    assert!(
+        writer
+            .load_request(handle)
+            .is_err_and(|error| matches!(*error, Error::Decode { .. }))
+    );
     for _ in 0..3 {
-        assert!(matches!(writer.save_request(), Err(Error::LoadRequired)));
+        assert!(
+            writer
+                .save_request()
+                .is_err_and(|error| matches!(*error, Error::Closed))
+        );
     }
     let generation: i64 = connection
         .query_row("SELECT generation FROM meta", [], |row| row.get(0))
@@ -635,35 +686,18 @@ fn failed_load_blocks_writes_until_a_successful_reload() {
             [b"9".to_vec()],
         )
         .unwrap();
-    writer.load_request().unwrap();
+    writer.load_request(handle).unwrap();
     assert_eq!(writer.world().resource::<Clock>().0, 9);
     assert_eq!(writer.save_request().unwrap().generation, 2);
 }
 
 #[test]
-fn another_writer_creating_a_previously_missing_save_is_a_conflict() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut first = app(&path, Capture::Changed);
-    assert_eq!(first.load_request().unwrap(), LoadOutcome::Missing);
-    let mut second = app(&path, Capture::Changed);
-    second.save_request().unwrap();
-    assert!(matches!(
-        first.save_request(),
-        Err(Error::Conflict {
-            expected: 0,
-            actual: 1
-        })
-    ));
-}
-
-#[test]
 fn corrupt_orphan_record_is_rejected_even_if_foreign_keys_were_disabled() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut app = app(&path, Capture::Snapshot);
+    let mut app = app(directory.path(), Capture::Snapshot);
+    app.new_request();
     app.save_request().unwrap();
-    let connection = Connection::open(&path).unwrap();
+    let connection = Connection::open(only_file(directory.path())).unwrap();
     connection.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
     connection
         .execute(
@@ -671,28 +705,37 @@ fn corrupt_orphan_record_is_rejected_even_if_foreign_keys_were_disabled() {
             params![br#"{"name":1,"value":2}"#.to_vec()],
         )
         .unwrap();
-    assert!(matches!(app.load_request(), Err(Error::InvalidData(_))));
+    assert!(
+        app.reload()
+            .is_err_and(|error| matches!(*error, Error::InvalidData(_)))
+    );
 }
 
 #[test]
-fn empty_files_and_directories_are_failed_loads_not_missing_saves() {
+fn empty_file_is_a_failed_load_not_a_missing_save() {
     let directory = tempfile::tempdir().unwrap();
-    let empty = directory.path().join("empty.sqlite");
+    let mut writer = app(directory.path(), Capture::Snapshot);
+    let handle = writer.new_request();
+    writer.save_request().unwrap();
+    let path = only_file(directory.path());
+    let other = tempfile::tempdir().unwrap();
+    let empty = other.path().join(path.file_name().unwrap());
     std::fs::write(&empty, []).unwrap();
-    for path in [&empty, directory.path()] {
-        let mut app = app(path, Capture::Snapshot);
-        assert!(app.load_request().is_err());
-        assert!(matches!(app.save_request(), Err(Error::LoadRequired)));
-    }
+    let mut reader = app(other.path(), Capture::Snapshot);
+    assert!(
+        reader
+            .load_request(handle)
+            .is_err_and(|error| matches!(*error, Error::Format))
+    );
     assert_eq!(std::fs::metadata(empty).unwrap().len(), 0);
 }
 
 #[test]
 fn filesystem_failures_preserve_the_io_source() {
     let mut app = app(Path::new("invalid\0path"), Capture::Snapshot);
-    let error = app.load_request().unwrap_err();
-    assert!(matches!(error, Error::Io(_)));
-    let source = std::error::Error::source(error)
+    let error = app.list_request().unwrap_err();
+    assert!(matches!(*error, Error::Io(_)));
+    let source = std::error::Error::source(error.as_ref())
         .and_then(|source| source.downcast_ref::<std::io::Error>())
         .unwrap();
     assert_eq!(source.kind(), std::io::ErrorKind::InvalidInput);

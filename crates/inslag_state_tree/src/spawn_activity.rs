@@ -256,7 +256,7 @@ mod tests {
             (run.token, child)
         };
         app.save_request().unwrap();
-        app.load_request().unwrap();
+        app.reload().unwrap();
         update_state_trees(&mut app);
         update_state_trees(&mut app);
         update_state_trees(&mut app);
@@ -290,7 +290,7 @@ mod tests {
             .insert(crate::PersistStateTree);
         app.update();
         app.save_request().unwrap();
-        app.load_request().unwrap();
+        app.reload().unwrap();
         assert_eq!(app.world().resource::<SpawnRuns>().runs.len(), 1);
         insert_for_run(&mut app, running_child_definition());
         update_state_trees(&mut app);
@@ -353,7 +353,7 @@ mod tests {
             )
             .clear();
         app.save_request().unwrap();
-        app.load_request().unwrap();
+        app.reload().unwrap();
         update_state_trees(&mut app);
         update_state_trees(&mut app);
         for _ in 0..1_000 {
@@ -516,11 +516,10 @@ mod tests {
 
     #[cfg(feature = "persistence")]
     fn sqlite_app(directory: &tempfile::TempDir) -> App {
+        use crate::persistence_test::Requests;
         let mut app = app();
-        app.add_plugins(
-            inslag_persist::SavePlugin::sqlite(directory.path().join("save.sqlite"))
-                .load_on_start(false),
-        );
+        app.add_plugins(inslag_persist::SavePlugin::sqlite(directory.path()));
+        app.new_request();
         app
     }
 

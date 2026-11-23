@@ -108,9 +108,19 @@ fn direct_sqlite<const N: usize>(bencher: Bencher, percent: usize) {
 #[divan::bench(consts = [1_000, 100_000], sample_size = 1, sample_count = 20)]
 fn restore<const N: usize>(bencher: Bencher) {
     bencher
-        .with_inputs(|| setup(N, 0))
-        .bench_local_refs(|case| {
-            case.app.load_request().unwrap();
+        .with_inputs(|| {
+            let mut case = setup(N, 0);
+            let handle = case
+                .app
+                .world()
+                .resource::<inslag_persist::SaveStatus>()
+                .handle()
+                .unwrap();
+            case.app.close_request();
+            (case, handle)
+        })
+        .bench_local_refs(|(case, handle)| {
+            case.app.load_request(*handle).unwrap();
             black_box(case.app.world().entities().len());
         });
 }
@@ -118,11 +128,12 @@ fn restore<const N: usize>(bencher: Bencher) {
 fn setup(entities: usize, percent: usize) -> Case {
     let directory = tempfile::tempdir().unwrap();
     let mut app = App::new();
-    app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")).load_on_start(false))
+    app.add_plugins(SavePlugin::sqlite(directory.path()))
         .persist(component::<Machine>("machine"))
         .insert_resource(Edits(entities * percent / 100))
         .add_systems(Update, simulate);
     app.update();
+    app.new_request();
     app.world_mut()
         .spawn_batch((0..entities).map(|index| Machine {
             ticks: 0,

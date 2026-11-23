@@ -1,12 +1,12 @@
 #![cfg(feature = "persistence")]
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use bevy_app::{App, Last, TaskPoolPlugin, Update};
+use bevy_app::{App, TaskPoolPlugin, Update};
 use bevy_asset::{AssetPlugin, Assets};
 use bevy_ecs::{prelude::*, system::RunSystemOnce};
 use bevy_time::{Time, TimePlugin};
-use inslag_persist::{Error, SavePlugin, SaveRequest, SaveStatus};
+use inslag_persist::{Error, SavePlugin};
 use inslag_state_tree::prelude::*;
 #[path = "../../inslag_persist/tests/support/requests.rs"]
 mod requests;
@@ -63,7 +63,7 @@ fn app(directory: &tempfile::TempDir) -> App {
         TimePlugin,
         AssetPlugin::default(),
         StateTreePlugin::new(Update),
-        SavePlugin::sqlite(directory.path().join("clock.sqlite")),
+        SavePlugin::sqlite(directory.path()),
     ))
     .add_state_tree_event::<Sample>();
     app
@@ -134,6 +134,7 @@ fn clock(app: &App) -> (Duration, Duration) {
 fn save_samples_current_time_without_running_or_changing_the_tree() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = app(&directory);
+    app.new_request();
     let entity = spawn(&mut app, "clock", SAMPLER);
     let tree_changed = app
         .world()
@@ -170,7 +171,7 @@ fn save_samples_current_time_without_running_or_changing_the_tree() {
         clock(&app),
         (Duration::from_secs(1), Duration::from_secs(1))
     );
-    app.load_request().unwrap();
+    app.reload().unwrap();
     let entity = owner(&mut app);
     sample(&mut app, entity);
     assert_eq!(number(&app, entity, "game"), 1.);
@@ -183,6 +184,7 @@ fn save_samples_current_time_without_running_or_changing_the_tree() {
 fn restoring_into_a_fresh_app_uses_saved_game_time_and_a_new_session() {
     let directory = tempfile::tempdir().unwrap();
     let mut source = app(&directory);
+    let save = source.new_request();
     spawn(&mut source, "clock", SAMPLER);
     advance(&mut source, Duration::from_secs(103));
     source.save_request().unwrap();
@@ -193,7 +195,7 @@ fn restoring_into_a_fresh_app_uses_saved_game_time_and_a_new_session() {
             .world_mut()
             .resource_mut::<Assets<StateTreeDefinition>>()
             .add(definition("clock", SAMPLER));
-        target.load_request().unwrap();
+        target.load_request(save).unwrap();
         let entity = owner(&mut target);
         sample(&mut target, entity);
         assert_eq!(number(&target, entity, "game"), 103.);
@@ -215,13 +217,14 @@ fn restoring_into_a_fresh_app_uses_saved_game_time_and_a_new_session() {
 fn repeated_restore_rewinds_game_time_without_rewinding_bevy_time() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = app(&directory);
+    app.new_request();
     spawn(&mut app, "clock", SAMPLER);
     advance(&mut app, Duration::from_secs(3));
     app.save_request().unwrap();
     for elapsed in [Duration::from_secs(100), Duration::from_secs(200)] {
         advance(&mut app, elapsed);
         let runtime_elapsed = app.world().resource::<Time>().elapsed();
-        app.load_request().unwrap();
+        app.reload().unwrap();
         assert_eq!(clock(&app), (Duration::from_secs(3), Duration::ZERO));
         assert_eq!(app.world().resource::<Time>().elapsed(), runtime_elapsed);
         let entity = owner(&mut app);
@@ -236,6 +239,7 @@ fn saved_deadline_rearms_only_its_remaining_duration_after_a_century() {
     let century = Duration::from_secs(100 * 365 * 24 * 60 * 60);
     let directory = tempfile::tempdir().unwrap();
     let mut source = app(&directory);
+    let save = source.new_request();
     advance(&mut source, century);
     spawn(&mut source, "deadline", DEADLINE);
     advance(&mut source, Duration::from_secs(3));
@@ -246,7 +250,7 @@ fn saved_deadline_rearms_only_its_remaining_duration_after_a_century() {
         .world_mut()
         .resource_mut::<Assets<StateTreeDefinition>>()
         .add(definition("deadline", DEADLINE));
-    target.load_request().unwrap();
+    target.load_request(save).unwrap();
     target.world_mut().run_schedule(Update);
     let entity = owner(&mut target);
     advance(&mut target, Duration::from_millis(6999));
@@ -278,10 +282,11 @@ fn saved_deadline_rearms_only_its_remaining_duration_after_a_century() {
 fn overdue_saved_deadline_routes_without_arming_a_zero_duration_timer() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = app(&directory);
+    app.new_request();
     spawn(&mut app, "deadline", DEADLINE);
     advance(&mut app, Duration::from_secs(3));
     app.save_request().unwrap();
-    app.load_request().unwrap();
+    app.reload().unwrap();
     advance(&mut app, Duration::from_secs(8));
     let entity = owner(&mut app);
     assert_eq!(
@@ -299,12 +304,13 @@ fn overdue_saved_deadline_routes_without_arming_a_zero_duration_timer() {
 fn repeated_save_and_load_keeps_integer_nanoseconds_after_a_century() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = app(&directory);
+    app.new_request();
     spawn(&mut app, "clock", SAMPLER);
     let initial = Duration::new(100 * 365 * 24 * 60 * 60, 123_456_789);
     advance(&mut app, initial);
     for _ in 0..10 {
         app.save_request().unwrap();
-        app.load_request().unwrap();
+        app.reload().unwrap();
         app.world_mut().run_schedule(Update);
     }
     assert_eq!(clock(&app), (initial, Duration::ZERO));
@@ -319,16 +325,9 @@ fn repeated_save_and_load_keeps_integer_nanoseconds_after_a_century() {
 fn closing_a_save_resets_game_time_without_resetting_bevy_time() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = app(&directory);
+    app.new_request();
     advance(&mut app, Duration::from_secs(50));
-    app.save_request().unwrap();
-    app.world_mut().write_message(SaveRequest::Close);
-    app.world_mut().run_schedule(Last);
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while app.world().resource::<SaveStatus>().is_saving() {
-        assert!(Instant::now() < deadline, "close did not finish");
-        std::thread::yield_now();
-        app.world_mut().run_schedule(Last);
-    }
+    app.close_request();
     assert_eq!(clock(&app), (Duration::ZERO, Duration::ZERO));
     assert_eq!(
         app.world().resource::<Time>().elapsed(),
@@ -345,10 +344,11 @@ fn closing_a_save_resets_game_time_without_resetting_bevy_time() {
 fn hot_reload_preserves_game_and_session_time() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = app(&directory);
+    app.new_request();
     spawn(&mut app, "clock", SAMPLER);
     advance(&mut app, Duration::from_secs(10));
     app.save_request().unwrap();
-    app.load_request().unwrap();
+    app.reload().unwrap();
     let entity = owner(&mut app);
     sample(&mut app, entity);
     advance(&mut app, Duration::from_secs(2));
@@ -391,6 +391,7 @@ fn hot_reload_preserves_game_and_session_time() {
 fn restoring_game_time_does_not_change_an_unmarked_trees_existing_timer() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = app(&directory);
+    app.new_request();
     spawn(&mut app, "clock", SAMPLER);
     let entity = spawn(&mut app, "deadline", DEADLINE);
     app.world_mut()
@@ -399,7 +400,7 @@ fn restoring_game_time_does_not_change_an_unmarked_trees_existing_timer() {
     advance(&mut app, Duration::from_secs(3));
     app.save_request().unwrap();
     advance(&mut app, Duration::from_secs(4));
-    app.load_request().unwrap();
+    app.reload().unwrap();
     advance(&mut app, Duration::from_millis(2999));
     assert_eq!(
         app.world()
@@ -423,6 +424,7 @@ fn restoring_game_time_does_not_change_an_unmarked_trees_existing_timer() {
 fn sqlite_load_restores_the_clock_before_the_first_tree_initializes() {
     let directory = tempfile::tempdir().unwrap();
     let mut source = app(&directory);
+    let save = source.new_request();
     spawn(&mut source, "deadline", DEADLINE);
     advance(&mut source, Duration::from_secs(3));
     source.save_request().unwrap();
@@ -433,7 +435,7 @@ fn sqlite_load_restores_the_clock_before_the_first_tree_initializes() {
         .resource_mut::<Assets<StateTreeDefinition>>()
         .add(definition("deadline", DEADLINE));
     advance(&mut target, Duration::from_secs(400));
-    target.load_request().unwrap();
+    target.load_request(save).unwrap();
     assert_eq!(clock(&target), (Duration::from_secs(3), Duration::ZERO));
     target.world_mut().run_schedule(Update);
     let entity = owner(&mut target);
@@ -446,6 +448,7 @@ fn sqlite_load_restores_the_clock_before_the_first_tree_initializes() {
 fn failed_restore_leaves_the_outgoing_game_and_session_time_unchanged() {
     let directory = tempfile::tempdir().unwrap();
     let mut source = app(&directory);
+    let save = source.new_request();
     spawn(&mut source, "ambiguous", SAMPLER);
     advance(&mut source, Duration::from_secs(3));
     source.save_request().unwrap();
@@ -459,10 +462,10 @@ fn failed_restore_leaves_the_outgoing_game_and_session_time_unchanged() {
             .add(definition("ambiguous", SAMPLER))
     });
     advance(&mut target, Duration::from_secs(40));
-    assert!(matches!(
-        target.load_request(),
-        Err(Error::InvalidData(message)) if message == "ambiguous generated definition"
-    ));
+    assert!(target.load_request(save).is_err_and(|error| matches!(
+        error.as_ref(),
+        Error::InvalidData(message) if message == "ambiguous generated definition"
+    )));
     assert_eq!(
         clock(&target),
         (Duration::from_secs(40), Duration::from_secs(40))

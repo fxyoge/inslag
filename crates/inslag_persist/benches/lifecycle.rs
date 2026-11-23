@@ -70,14 +70,15 @@ fn load(bencher: Bencher, entities: usize) {
         .with_inputs(|| {
             let (mut writer, directory) = setup(entities);
             assert_eq!(writer.save_request().unwrap().upserts, entities);
+            let handle = writer.world().resource::<SaveStatus>().handle().unwrap();
             drop(writer);
             let mut reader = App::new();
             reader
-                .add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")))
+                .add_plugins(SavePlugin::sqlite(directory.path()))
                 .persist(component::<Record>("record"));
-            (reader, directory)
+            (reader, directory, handle)
         })
-        .bench_local_refs(|(app, _)| black_box(app.load_request().unwrap()));
+        .bench_local_refs(|(app, _, handle)| app.load_request(black_box(*handle)).unwrap());
 }
 
 fn main() {
@@ -125,13 +126,10 @@ fn setup(entities: usize) -> (App, tempfile::TempDir) {
     let directory = tempfile::tempdir().unwrap();
     let mut app = App::new();
     app.init_resource::<Time<Real>>()
-        .add_plugins(
-            SavePlugin::sqlite(directory.path().join("save.sqlite"))
-                .load_on_start(false)
-                .autosave(Duration::from_secs(1)),
-        )
+        .add_plugins(SavePlugin::sqlite(directory.path()).autosave(Duration::from_secs(1)))
         .persist(component::<Record>("record").capture(Capture::Changed));
     app.update();
+    app.new_request();
     app.world_mut()
         .spawn_batch((0..entities).map(|index| Record {
             ticks: 0,

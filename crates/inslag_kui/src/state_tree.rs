@@ -807,8 +807,11 @@ mod tests {
         app.add_plugins((
             StateTreePlugin::new(Update),
             KuiStateTreePlugin,
-            SavePlugin::sqlite(directory.path().join("save.sqlite")).load_on_start(false),
+            SavePlugin::sqlite(directory.path()),
         ));
+        app.world_mut().write_message(SaveRequest::New);
+        app.world_mut().run_schedule(Last);
+        let save = app.world().resource::<SaveStatus>().handle().unwrap();
         let owner = spawn(&mut app, "saved.kui");
         app.world_mut()
             .entity_mut(owner)
@@ -822,18 +825,26 @@ mod tests {
         send(&mut app, owner, "saved-action");
         app.update();
         send(&mut app, owner, "discarded-action");
-        for request in [SaveRequest::Save, SaveRequest::Load] {
-            let is_save = matches!(request, SaveRequest::Save);
+        for request in [
+            SaveRequest::Save,
+            SaveRequest::Close,
+            SaveRequest::Load(save),
+        ] {
             app.world_mut().write_message(request);
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             loop {
                 app.world_mut().run_schedule(Last);
                 let status = app.world().resource::<SaveStatus>();
                 if !status.is_saving() && !status.is_loading() {
-                    if is_save {
-                        status.last_save().unwrap().as_ref().unwrap();
-                    } else {
-                        status.load().unwrap().as_ref().unwrap();
+                    match request {
+                        SaveRequest::Save => {
+                            status.last_save().unwrap().as_ref().unwrap();
+                        }
+                        SaveRequest::Close => assert!(status.handle().is_none()),
+                        SaveRequest::Load(_) => {
+                            status.load().unwrap().as_ref().unwrap();
+                        }
+                        _ => unreachable!(),
                     }
                     break;
                 }

@@ -20,7 +20,8 @@
 //! struct Health(u32);
 //!
 //! let mut app = App::new();
-//! app.add_plugins(SavePlugin::sqlite("save.sqlite"));
+//! app.add_plugins(SavePlugin::sqlite("saves"));
+//! app.world_mut().write_message(SaveRequest::New);
 //! app.update();
 //!
 //! app.world_mut().resource_mut::<Score>().0 = 10;
@@ -29,13 +30,12 @@
 //! app.update();
 //! ```
 //!
-//! An existing save loads at startup. For a new save, resources are initialized
-//! with [`FromWorld`] or [`Default`]. Entities with saved components are included;
-//! their [`Name`] and [`Transform`](bevy_transform::components::Transform)
-//! components are saved too.
+//! For a new save, resources are initialized with [`FromWorld`] or [`Default`].
+//! Entities with saved components are included; their [`Name`] and
+//! [`Transform`](bevy_transform::components::Transform) components are saved too.
 //!
 //! Give each saved type a unique key and keep it stable when renaming Rust types.
-//! Check [`SaveStatus`] for load and save results.
+//! Check [`SaveCompleted`] for load and save results.
 //!
 //! # Autosave
 //!
@@ -50,21 +50,10 @@
 //!
 //! let mut app = App::new();
 //! app.add_plugins(TimePlugin)
-//!     .add_plugins(SavePlugin::sqlite("save.sqlite").autosave(Duration::from_secs(30)));
+//!     .add_plugins(SavePlugin::sqlite("saves").autosave(Duration::from_secs(30)));
 //! ```
 //!
 //! The interval uses real time, so pausing the simulation does not pause autosave.
-//!
-//! # Open and close saves
-//!
-//! Send requests through Bevy's message system:
-//!
-//! - [`SaveRequest::Open(path)`](SaveRequest::Open) saves the current session and opens another file.
-//! - [`SaveRequest::Load`] reloads the current file, discarding unsaved changes.
-//! - [`SaveRequest::Close`] saves and closes the current file.
-//!
-//! Use [`SavePlugin::default()`] to start without opening a file. For setup that
-//! needs loaded data, add systems to [`SaveOpened`].
 mod plugins;
 pub use plugins::SavePlugin;
 
@@ -80,7 +69,8 @@ pub mod asset;
 pub mod entity;
 
 pub use lifecycle::{
-    PrepareSave, SaveClosed, SaveOpened, SaveRequest, SaveSet, SaveSettings, SaveStatus,
+    LoadOutcome, PrepareSave, SaveClosed, SaveCompleted, SaveOpened, SaveRequest, SaveSet,
+    SaveSettings, SaveStatus,
 };
 pub use registration::{AppSaveExt, Capture, ComponentSave, Dirty, Registration, component};
 pub use storage::{Error, SaveStats};
@@ -92,20 +82,17 @@ pub mod __private {
 }
 
 pub mod prelude {
-    pub use crate::{SavePlugin, SaveRequest, SaveSettings, SaveStatus, save};
+    pub use crate::{
+        SaveCompleted, SaveHandle, SavePlugin, SaveRequest, SaveSettings, SaveStatus, save,
+    };
 }
 
 use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::SystemCondition;
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 type ConfigureReadiness = Box<dyn Fn(&mut App) + Send + Sync>;
 
-/// A missing save is a fresh session, not a load failure.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LoadOutcome {
-    Missing,
-    Loaded,
-}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SaveHandle(u128);
