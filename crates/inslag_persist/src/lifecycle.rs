@@ -133,13 +133,6 @@ pub(crate) fn run_idle<T>(
     run_active(world, operation)
 }
 
-fn run_active<T>(world: &mut World, operation: impl FnOnce(&mut World) -> T) -> T {
-    world.resource_mut::<SaveSession>().running = true;
-    let result = operation(world);
-    world.resource_mut::<SaveSession>().running = false;
-    result
-}
-
 pub(crate) fn set_enabled(In(enabled): In<bool>, mut session: ResMut<SaveSession>) {
     session.enabled = enabled;
 }
@@ -245,6 +238,29 @@ fn process_active(world: &mut World, request: Option<SaveRequest>) {
         reset_deadline(world);
     }
 }
+fn save(world: &mut World) -> Result<(), Error> {
+    let result = if ready(world) {
+        storage::save(world)
+    } else {
+        Err(Error::NotReady)
+    };
+    record_save(world, &result);
+    result.map(|_| ())
+}
+pub(crate) fn record_save(world: &mut World, result: &Result<SaveStats, Error>) {
+    let mut status = world.resource_mut::<SaveStatus>();
+    status.last_save = Some(result.as_ref().copied().map_err(ToString::to_string));
+    if result.is_ok() {
+        status.writable = true;
+        reset_deadline(world);
+    }
+}
+fn run_active<T>(world: &mut World, operation: impl FnOnce(&mut World) -> T) -> T {
+    world.resource_mut::<SaveSession>().running = true;
+    let result = operation(world);
+    world.resource_mut::<SaveSession>().running = false;
+    result
+}
 fn open(world: &mut World, path: PathBuf) {
     world.resource_mut::<SaveSession>().opening = Some(Opening {
         storage: Storage::new(path.clone()),
@@ -299,15 +315,6 @@ fn finish_open(world: &mut World) {
         }
     }
 }
-fn save(world: &mut World) -> Result<(), Error> {
-    let result = if ready(world) {
-        storage::save(world)
-    } else {
-        Err(Error::NotReady)
-    };
-    record_save(world, &result);
-    result.map(|_| ())
-}
 fn outgoing(world: &World) -> bool {
     !world.resource::<Storage>().closed
         && (world.resource::<SaveStatus>().writable
@@ -317,14 +324,6 @@ fn outgoing(world: &World) -> bool {
 fn ready(world: &mut World) -> bool {
     world.run_schedule(CheckReadiness);
     world.resource::<SaveSession>().enabled
-}
-pub(crate) fn record_save(world: &mut World, result: &Result<SaveStats, Error>) {
-    let mut status = world.resource_mut::<SaveStatus>();
-    status.last_save = Some(result.as_ref().copied().map_err(ToString::to_string));
-    if result.is_ok() {
-        status.writable = true;
-        reset_deadline(world);
-    }
 }
 pub(crate) fn record_load(world: &mut World, result: &Result<LoadOutcome, Error>) {
     let writable = storage::can_save(world);
