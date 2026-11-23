@@ -3,6 +3,8 @@ use bevy_ecs::prelude::*;
 use bevy_time::{Real, Time};
 use divan::{Bencher, black_box};
 use inslag_persist::{AppSaveExt, Capture, SavePlugin, SaveStatus, component};
+#[path = "support/filtered_attachments.rs"]
+mod filtered_attachments;
 #[path = "../tests/support/requests.rs"]
 mod requests;
 use requests::Requests;
