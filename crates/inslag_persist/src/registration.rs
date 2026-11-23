@@ -326,6 +326,13 @@ struct ComponentCodec<T: Component, F: ArchetypeFilter + 'static> {
     last_commit: Tick,
     committing: HashSet<Entity>,
     attached: bool,
+    attachment_matches: Option<AttachmentMatches>,
+}
+
+#[derive(Default)]
+struct AttachmentMatches {
+    committed: HashSet<(Entity, i64)>,
+    captured: HashSet<(Entity, i64)>,
 }
 
 impl<T, F> From<ComponentSave<T, F>> for Registration
@@ -339,14 +346,19 @@ where
             kind: 1,
             type_id: TypeId::of::<T>(),
             setup: Box::new(move |world| {
+                let filtered = TypeId::of::<F>() != TypeId::of::<()>();
+                let attachment_matches =
+                    (value.attached && filtered).then(AttachmentMatches::default);
                 world.insert_resource(Tracking::<T> {
                     members: HashSet::new(),
                     pending: Mutex::default(),
-                    filtered: value.attached || TypeId::of::<F>() != TypeId::of::<()>(),
+                    filtered: value.attached || filtered,
                     marker: PhantomData,
                 });
-                world.add_observer(inserted::<T>);
-                world.add_observer(removed::<T>);
+                if attachment_matches.is_none() {
+                    world.add_observer(inserted::<T>);
+                    world.add_observer(removed::<T>);
+                }
                 let mut codec = ComponentCodec::<T, F> {
                     key: value.key,
                     capture: value.capture,
@@ -360,6 +372,7 @@ where
                     last_commit: Tick::new(0),
                     committing: HashSet::new(),
                     attached: value.attached,
+                    attachment_matches,
                 };
                 codec.reset(world);
                 Box::new(codec)
@@ -449,25 +462,40 @@ where
         batch: &mut Batch,
     ) -> Result<Option<Box<dyn Any>>, Error> {
         if self.attached {
+            let ids = world.resource::<Identities>();
+            if let Some(matches) = &mut self.attachment_matches {
+                matches.captured.clear();
+            }
             for (entity, value) in self.query.iter_manual(world) {
-                if world
-                    .resource::<Identities>()
-                    .entries
-                    .get(&entity)
-                    .is_some_and(|id| id.memberships > 0)
-                {
+                if let Some(identity) = ids.entries.get(&entity).filter(|id| id.memberships > 0) {
                     self.encode(entity, &value, world, batch)?;
+                    if let Some(matches) = &mut self.attachment_matches {
+                        matches.captured.insert((entity, identity.id));
+                    }
                 }
             }
-            let tracking = world.resource::<Tracking<T>>();
-            let pending = tracking.pending.lock().expect("dirty queue poisoned");
-            let ids = world.resource::<Identities>();
-            for entity in pending
-                .iter()
-                .filter(|entity| world.get::<T>(**entity).is_none())
-            {
-                if let Some(identity) = ids.entries.get(entity) {
-                    batch.deletes.push((identity.id, self.key));
+            if let Some(matches) = &self.attachment_matches {
+                batch.deletes.extend(
+                    matches
+                        .committed
+                        .difference(&matches.captured)
+                        // Keep deletion counts consistent with unfiltered attachments:
+                        // losing ownership alone is handled by the entity cascade.
+                        .filter(|(entity, _)| {
+                            !ids.removed.contains(entity) || world.get::<T>(*entity).is_none()
+                        })
+                        .map(|&(_, id)| (id, self.key)),
+                );
+            } else {
+                let tracking = world.resource::<Tracking<T>>();
+                let pending = tracking.pending.lock().expect("dirty queue poisoned");
+                for entity in pending
+                    .iter()
+                    .filter(|entity| world.get::<T>(**entity).is_none())
+                {
+                    if let Some(identity) = ids.entries.get(entity) {
+                        batch.deletes.push((identity.id, self.key));
+                    }
                 }
             }
             return Ok(None);
@@ -546,6 +574,9 @@ where
         if committed {
             self.last_commit = tick;
             self.committing.clear();
+            if let Some(matches) = &mut self.attachment_matches {
+                std::mem::swap(&mut matches.committed, &mut matches.captured);
+            }
         } else {
             world
                 .resource_mut::<Tracking<T>>()
@@ -557,6 +588,10 @@ where
     }
 
     fn reset(&mut self, world: &mut World) {
+        if let Some(matches) = &mut self.attachment_matches {
+            matches.committed.clear();
+            matches.captured.clear();
+        }
         world.resource_mut::<Tracking<T>>().members.clear();
         world
             .resource_mut::<Tracking<T>>()

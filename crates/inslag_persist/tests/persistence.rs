@@ -185,6 +185,141 @@ fn newly_registered_resources_default_but_saved_absence_stays_absent() {
 struct Selected;
 
 #[test]
+fn deselected_attachment_is_deleted_on_commit_but_not_on_rollback() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = App::new();
+    app.add_plugins(SavePlugin::sqlite(directory.path()))
+        .persist(component::<Position>("position"))
+        .persist(
+            component::<Label>("label")
+                .attached()
+                .filter::<With<Selected>>(),
+        );
+    app.new_request();
+    let position = Position { name: 1, value: 10 };
+    let entity = app
+        .world_mut()
+        .spawn((position.clone(), Label("attached".into()), Selected))
+        .id();
+    let second = Position { name: 2, value: 20 };
+    let reselected = app
+        .world_mut()
+        .spawn((second.clone(), Label("reselected".into()), Selected))
+        .id();
+    let unowned = app
+        .world_mut()
+        .spawn((Label("unowned".into()), Selected))
+        .id();
+    let first = app.save_request().unwrap();
+    assert_eq!((first.entities, first.upserts), (2, 4));
+    let connection = Connection::open(only_file(directory.path())).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER reject_commit BEFORE UPDATE ON meta
+             BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+        )
+        .unwrap();
+
+    app.world_mut().entity_mut(entity).remove::<Selected>();
+    app.world_mut().entity_mut(reselected).remove::<Selected>();
+    assert!(app.save_request().is_err());
+    let label_count = || {
+        connection
+            .query_row(
+                "SELECT count(*) FROM records WHERE type_key = 'label'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+    };
+    assert_eq!(label_count(), 2);
+    connection
+        .execute_batch("DROP TRIGGER reject_commit")
+        .unwrap();
+    app.world_mut().entity_mut(reselected).insert(Selected);
+    let retry = app.save_request().unwrap();
+    assert_eq!(
+        (retry.generation, retry.entities, retry.deletions),
+        (2, 2, 1)
+    );
+    assert!(app.world().get::<Label>(entity).is_some());
+
+    app.reload().unwrap();
+    assert_eq!(positions(app.world_mut()), [position, second]);
+    assert_eq!(
+        app.world_mut()
+            .query_filtered::<&Label, With<Position>>()
+            .single(app.world())
+            .unwrap(),
+        &Label("reselected".into())
+    );
+    assert_eq!(
+        app.world().get::<Label>(unowned),
+        Some(&Label("unowned".into()))
+    );
+}
+
+#[test]
+fn removing_a_filtered_attachment_keeps_the_owner_saved() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = App::new();
+    app.add_plugins(SavePlugin::sqlite(directory.path()))
+        .persist(component::<Position>("position").capture(Capture::Dirty))
+        .persist(
+            component::<Label>("label")
+                .attached()
+                .filter::<With<Selected>>(),
+        );
+    app.new_request();
+    let position = Position { name: 1, value: 10 };
+    let entity = app
+        .world_mut()
+        .spawn((position.clone(), Label("attached".into()), Selected))
+        .id();
+    app.save_request().unwrap();
+
+    app.world_mut().entity_mut(entity).remove::<Label>();
+    let stats = app.save_request().unwrap();
+    assert_eq!((stats.entities, stats.upserts, stats.deletions), (1, 0, 1));
+    app.reload().unwrap();
+    assert_eq!(positions(app.world_mut()), [position]);
+    let mut labels = app.world_mut().query::<&Label>();
+    assert!(labels.iter(app.world()).next().is_none());
+}
+
+#[test]
+fn losing_the_last_owner_does_not_count_as_an_attachment_deletion() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = App::new();
+    app.add_plugins(SavePlugin::sqlite(directory.path()))
+        .persist(component::<Position>("position"))
+        .persist(
+            component::<Label>("label")
+                .attached()
+                .filter::<With<Selected>>(),
+        );
+    app.new_request();
+    let entity = app
+        .world_mut()
+        .spawn((
+            Position { name: 1, value: 10 },
+            Label("attached".into()),
+            Selected,
+        ))
+        .id();
+    app.save_request().unwrap();
+
+    app.world_mut().entity_mut(entity).remove::<Position>();
+    let stats = app.save_request().unwrap();
+    assert_eq!((stats.entities, stats.deletions), (0, 1));
+    let records: i64 = Connection::open(only_file(directory.path()))
+        .unwrap()
+        .query_row("SELECT count(*) FROM records", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(records, 0);
+}
+
+#[test]
 fn filtered_membership_changes_are_detected_without_marking_payloads() {
     for strategy in STRATEGIES {
         let directory = tempfile::tempdir().unwrap();
