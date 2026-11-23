@@ -1,4 +1,4 @@
-#![feature(rustc_private)]
+#![feature(default_field_values, rustc_private)]
 
 extern crate rustc_errors;
 extern crate rustc_hir;
@@ -18,7 +18,7 @@ use rustc_lint::{LateContext, LateLintPass, LintContext};
 use rustc_middle::ty;
 use rustc_span::{FileName, RemapPathScopeComponents, Span};
 
-rustc_session::declare_lint! {
+rustc_lint::declare_lint! {
     /// Feature-local plugin files keep installation wiring discoverable.
     pub BEVY_STANDARD_PLUGIN_FILENAME,
     Warn,
@@ -30,7 +30,7 @@ struct StandardPluginFilename {
     declarations: HashSet<LocalDefId>,
 }
 
-rustc_session::impl_lint_pass!(StandardPluginFilename => [BEVY_STANDARD_PLUGIN_FILENAME]);
+rustc_lint::impl_lint_pass!(StandardPluginFilename => [BEVY_STANDARD_PLUGIN_FILENAME]);
 dylint_linting::dylint_library!();
 
 #[unsafe(no_mangle)]

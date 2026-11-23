@@ -1,4 +1,4 @@
-#![feature(rustc_private)]
+#![feature(default_field_values, rustc_private)]
 
 extern crate rustc_ast;
 extern crate rustc_errors;
@@ -13,12 +13,12 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use rustc_errors::DiagDecorator;
-use rustc_hir::{HirId, Item, ItemKind, def::Res, def_id::DefId};
+use rustc_hir::{HirId, def::Res, def_id::DefId};
 use rustc_lint::{EarlyContext, EarlyLintPass, LateContext, LateLintPass, LintContext};
 use rustc_middle::ty::{self, Ty};
 use rustc_span::{Span, sym};
 
-rustc_session::declare_lint! {
+rustc_lint::declare_lint! {
     /// Production input must go through bevy_enhanced_input. Test scopes may
     /// inject raw input; intentional production exceptions can allow this lint.
     pub BEVY_ENFORCE_BEVY_ENHANCED_INPUT,
@@ -32,7 +32,7 @@ struct EnforceEnhancedInput {
 }
 
 struct TestScopes(Arc<Mutex<Vec<Span>>>);
-rustc_session::impl_lint_pass!(TestScopes => []);
+rustc_lint::impl_lint_pass!(TestScopes => []);
 
 impl EarlyLintPass for TestScopes {
     fn check_item(&mut self, _: &EarlyContext<'_>, item: &rustc_ast::Item) {
@@ -48,7 +48,7 @@ impl EarlyLintPass for TestScopes {
     }
 }
 
-rustc_session::impl_lint_pass!(EnforceEnhancedInput => [BEVY_ENFORCE_BEVY_ENHANCED_INPUT]);
+rustc_lint::impl_lint_pass!(EnforceEnhancedInput => [BEVY_ENFORCE_BEVY_ENHANCED_INPUT]);
 dylint_linting::dylint_library!();
 
 #[unsafe(no_mangle)]
@@ -73,17 +73,6 @@ impl<'tcx> LateLintPass<'tcx> for EnforceEnhancedInput {
     fn check_path(&mut self, cx: &LateContext<'tcx>, path: &rustc_hir::Path<'tcx>, id: HirId) {
         if let Res::Def(_, def_id) = path.res {
             self.check_definition(cx, def_id, path.span, id);
-        }
-    }
-
-    fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
-        // Use paths have a separate, per-namespace representation in HIR.
-        if let ItemKind::Use(path, rustc_hir::UseKind::Single(_)) = item.kind {
-            for res in path.res.iter().flatten() {
-                if let Res::Def(_, def_id) = res {
-                    self.check_definition(cx, *def_id, path.span, item.hir_id());
-                }
-            }
         }
     }
 }
@@ -217,13 +206,9 @@ fn is_test_scope(cx: &LateContext<'_>, id: HirId, span: Span, scopes: &[Span]) -
     std::iter::once(id)
         .chain(cx.tcx.hir_parent_iter(id).map(|(id, _)| id))
         .any(|id| {
-            if scopes
+            scopes
                 .iter()
                 .any(|scope| scope.contains(cx.tcx.hir_span(id)))
-            {
-                return true;
-            }
-            false
         })
 }
 

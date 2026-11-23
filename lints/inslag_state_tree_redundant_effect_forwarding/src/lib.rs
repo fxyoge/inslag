@@ -1,4 +1,4 @@
-#![feature(rustc_private)]
+#![feature(default_field_values, rustc_private)]
 
 extern crate rustc_ast;
 extern crate rustc_errors;
@@ -20,7 +20,7 @@ use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::{self, Ty, TypeckResults};
 use rustc_span::{DesugaringKind, Span, Symbol};
 
-rustc_session::declare_lint! {
+rustc_lint::declare_lint! {
     /// Effect registrations already select operations. Carrying that selection
     /// through a shared message and branching on it again duplicates routing.
     pub INSLAG_STATE_TREE_REDUNDANT_EFFECT_FORWARDING,
@@ -74,7 +74,7 @@ struct RedundantEffectForwarding<'tcx> {
     dispatches: Vec<Dispatch<'tcx>>,
 }
 
-rustc_session::impl_lint_pass!(RedundantEffectForwarding<'_> => [INSLAG_STATE_TREE_REDUNDANT_EFFECT_FORWARDING]);
+rustc_lint::impl_lint_pass!(RedundantEffectForwarding<'_> => [INSLAG_STATE_TREE_REDUNDANT_EFFECT_FORWARDING]);
 dylint_linting::dylint_library!();
 
 #[unsafe(no_mangle)]
@@ -268,13 +268,11 @@ fn effect_registration<'tcx>(
         .find(|item| item.name().as_str() == "from_state_tree_input")?
         .def_id;
     let message = generics.type_at(cx.tcx.generics_of(method).parent_count);
-    let input = ty::Instance::try_resolve(
-        cx.tcx,
-        cx.typing_env().with_post_analysis_normalized(cx.tcx),
-        constructor,
-        cx.tcx.mk_args(&[message.into()]),
-    )
-    .ok()??;
+    let args = cx.tcx.mk_args(&[message.into()]);
+    let ty::PseudoCanonicalInput { typing_env, value } = cx
+        .typing_env()
+        .with_post_analysis_normalized_invalidating_rigid_aliases(cx.tcx, args);
+    let input = ty::Instance::try_resolve(cx.tcx, typing_env, constructor, value).ok()??;
     let [name] = arguments else {
         return None;
     };
