@@ -263,7 +263,7 @@ fn run_active<T>(world: &mut World, operation: impl FnOnce(&mut World) -> T) -> 
 }
 fn open(world: &mut World, path: PathBuf) {
     world.resource_mut::<SaveSession>().opening = Some(Opening {
-        storage: Storage::new(path.clone()),
+        storage: Storage::sqlite(path.clone()),
         path,
     });
     let mut status = world.resource_mut::<SaveStatus>();
@@ -316,7 +316,7 @@ fn finish_open(world: &mut World) {
     }
 }
 fn outgoing(world: &World) -> bool {
-    !world.resource::<Storage>().closed
+    !world.resource::<Storage>().is_closed()
         && (world.resource::<SaveStatus>().writable
             || (world.resource::<Registry>().started
                 && world.resource::<SaveStatus>().load.is_none()))

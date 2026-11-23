@@ -62,13 +62,14 @@ impl SavePlugin {
 
 impl Plugin for SavePlugin {
     fn build(&self, app: &mut App) {
+        let storage = self
+            .path
+            .clone()
+            .map_or_else(storage::Storage::default, storage::Storage::sqlite);
         app.init_resource::<identity::Identities>()
             .init_resource::<registration::Registry>()
             .insert_resource(SaveStatus::new(self.path.clone()))
-            .insert_resource(storage::Storage::new(self.path.clone().unwrap_or_default()));
-        if self.path.is_none() {
-            app.world_mut().resource_mut::<storage::Storage>().close();
-        }
+            .insert_resource(storage);
         assert!(
             self.interval.is_none() || app.world().contains_resource::<Time<Real>>(),
             "autosave requires TimePlugin before SavePlugin"
