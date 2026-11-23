@@ -1,4 +1,4 @@
-#![feature(rustc_private)]
+#![feature(default_field_values, rustc_private)]
 
 extern crate rustc_ast;
 extern crate rustc_errors;
@@ -16,7 +16,7 @@ use std::{
 
 use rustc_errors::DiagDecorator;
 use rustc_hir::{
-    Expr, ExprKind, HirId, Item, ItemKind,
+    Expr, ExprKind, HirId,
     def::{DefKind, Res},
     def_id::DefId,
 };
@@ -24,7 +24,7 @@ use rustc_lint::{EarlyContext, EarlyLintPass, LateContext, LateLintPass, LintCon
 use rustc_middle::ty::{self, Ty};
 use rustc_span::{Span, sym};
 
-rustc_session::declare_lint! {
+rustc_lint::declare_lint! {
     /// Authored audio owns source selection and playback. Only the shared audio
     /// implementation and test scopes may access raw playback capabilities.
     pub BEVY_ENFORCE_INSLAG_AUDIO,
@@ -38,8 +38,8 @@ struct EnforceEnhancedAudio {
 }
 
 struct TestScopes(Arc<Mutex<Vec<Span>>>);
-rustc_session::impl_lint_pass!(TestScopes => []);
-rustc_session::impl_lint_pass!(EnforceEnhancedAudio => [BEVY_ENFORCE_INSLAG_AUDIO]);
+rustc_lint::impl_lint_pass!(TestScopes => []);
+rustc_lint::impl_lint_pass!(EnforceEnhancedAudio => [BEVY_ENFORCE_INSLAG_AUDIO]);
 dylint_linting::dylint_library!();
 
 impl EarlyLintPass for TestScopes {
@@ -78,18 +78,6 @@ impl<'tcx> LateLintPass<'tcx> for EnforceEnhancedAudio {
             && let Some(api) = forbidden_definition(cx, definition)
         {
             self.report(cx, api, path.span, id);
-        }
-    }
-
-    fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
-        if let ItemKind::Use(path, rustc_hir::UseKind::Single(_)) = item.kind {
-            for res in path.res.iter().flatten() {
-                if let Res::Def(_, definition) = res
-                    && let Some(api) = forbidden_definition(cx, *definition)
-                {
-                    self.report(cx, api, path.span, item.hir_id());
-                }
-            }
         }
     }
 
@@ -137,7 +125,7 @@ fn forbidden_definition(cx: &LateContext<'_>, id: DefId) -> Option<DefId> {
             cx.tcx.type_of(id).instantiate_identity().skip_norm_wip(),
         ),
         DefKind::Ctor(..) | DefKind::Variant => forbidden_definition(cx, cx.tcx.parent(id)),
-        DefKind::AssocFn | DefKind::AssocConst { .. } | DefKind::AssocTy => {
+        DefKind::AssocFn | DefKind::AssocConst | DefKind::AssocTy => {
             if let Some(implementation) = cx.tcx.impl_of_assoc(id) {
                 forbidden_type(
                     cx,

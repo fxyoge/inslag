@@ -16,6 +16,12 @@
   "automerge": true,
   "platformAutomerge": false,
   "packageRules": [{
+    "description": "Keep MSRV pinned",
+    "matchManagers": ["mise"],
+    "matchPackageNames": ["rust"],
+    "matchFileNames": ["mise.msrv.toml"],
+    "enabled": false
+  }, {
     "matchPackageNames": ["/bevy_.+$/"],
     "groupName": "Bevy"
   }]

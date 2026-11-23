@@ -1,4 +1,4 @@
-#![feature(rustc_private)]
+#![feature(default_field_values, rustc_private)]
 
 extern crate rustc_ast;
 extern crate rustc_errors;
@@ -22,7 +22,7 @@ use rustc_middle::ty::adjustment::{Adjust, DerefAdjustKind};
 use rustc_middle::ty::{self, Ty, TypeckResults};
 use rustc_span::{Span, Symbol};
 
-rustc_session::declare_lint! {
+rustc_lint::declare_lint! {
     /// Unknown effects, dependencies, or escaping results cannot establish waste.
     pub DISCARDED_PROJECTION_WORK,
     Deny,
@@ -34,7 +34,7 @@ struct DiscardedProjectionWork {
     pure: HashMap<LocalDefId, bool>,
 }
 
-rustc_session::impl_lint_pass!(DiscardedProjectionWork => [DISCARDED_PROJECTION_WORK]);
+rustc_lint::impl_lint_pass!(DiscardedProjectionWork => [DISCARDED_PROJECTION_WORK]);
 dylint_linting::dylint_library!();
 
 #[unsafe(no_mangle)]
@@ -359,7 +359,7 @@ fn safe_drop<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>, seen: &mut HashSet<Ty<'
             adt.destructor(cx.tcx).is_none()
                 && adt
                     .all_fields()
-                    .all(|field| safe_drop(cx, field.ty(cx.tcx, args).skip_norm_wip(), seen))
+                    .all(|field| safe_drop(cx, field.ty(cx.tcx, *args).skip_norm_wip(), seen))
         }
         _ => false,
     }

@@ -1,5 +1,6 @@
-#![feature(rustc_private)]
+#![feature(default_field_values, rustc_private)]
 
+extern crate rustc_attr_ir;
 extern crate rustc_errors;
 extern crate rustc_hir;
 extern crate rustc_lint;
@@ -20,7 +21,7 @@ use rustc_middle::ty::{self, Ty};
 use rustc_span::hygiene::{ExpnKind, MacroKind};
 use rustc_span::{Span, Symbol};
 
-rustc_session::declare_lint! {
+rustc_lint::declare_lint! {
     /// Unknown uses cannot establish the absence of a producer.
     pub BEVY_COMPONENT_WITHOUT_PRODUCER,
     Warn,
@@ -41,7 +42,7 @@ enum Access {
     Optional,
 }
 
-rustc_session::impl_lint_pass!(ComponentWithoutProducer => [BEVY_COMPONENT_WITHOUT_PRODUCER]);
+rustc_lint::impl_lint_pass!(ComponentWithoutProducer => [BEVY_COMPONENT_WITHOUT_PRODUCER]);
 dylint_linting::dylint_library!();
 
 #[unsafe(no_mangle)]
@@ -82,7 +83,10 @@ impl<'tcx> LateLintPass<'tcx> for ComponentWithoutProducer {
             .tcx
             .hir_attrs(cx.tcx.local_def_id_to_hir_id(id))
             .iter()
-            .any(|attr| attr.has_name(Symbol::intern("component")));
+            .any(|attr| {
+                matches!(attr, rustc_attr_ir::Attribute::DeriveHelper(attr)
+                    if *attr.path.segments == [Symbol::intern("component")])
+            });
         if cx.tcx.generics_of(id).count() == 0
             && !cx.tcx.effective_visibilities(()).is_reachable(id)
             && !cx.tcx.def_span(id).from_expansion()

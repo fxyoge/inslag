@@ -1,4 +1,4 @@
-#![feature(rustc_private)]
+#![feature(default_field_values, rustc_private)]
 
 extern crate rustc_errors;
 extern crate rustc_hir;
@@ -18,14 +18,14 @@ use rustc_hir::{
 use rustc_lint::{LateContext, LateLintPass, LintContext};
 use rustc_middle::ty::{self, Ty, TypeckResults};
 
-rustc_session::declare_lint! {
+rustc_lint::declare_lint! {
     /// Keep system registration visible in Bevy Plugin::build.
     pub BEVY_INDIRECT_SYSTEM_REGISTRATION,
     Warn,
     "helper calls in Plugin::build hide system registration"
 }
 
-rustc_session::declare_lint_pass!(BevyIndirectSystemRegistration => [BEVY_INDIRECT_SYSTEM_REGISTRATION]);
+rustc_lint::declare_lint_pass!(BevyIndirectSystemRegistration => [BEVY_INDIRECT_SYSTEM_REGISTRATION]);
 
 dylint_linting::dylint_library!();
 

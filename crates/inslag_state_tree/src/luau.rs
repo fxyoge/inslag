@@ -247,7 +247,7 @@ fn is_data_index(suffix: &Suffix) -> bool {
     };
     match index {
         Index::Dot { name, .. } => is_identifier(name, "data"),
-        Index::Brackets { expression, .. } => match expression {
+        Index::Brackets { expression, .. } => match expression.as_ref() {
             Expression::String(value) => match value.token().token_type() {
                 TokenType::StringLiteral { literal, .. } => {
                     literal.as_str() == "data" || literal.contains('\\')
