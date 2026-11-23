@@ -3,7 +3,8 @@ use bevy_app::{App, TaskPoolPlugin, Update};
 use bevy_asset::{AssetPlugin, Assets, Handle};
 use bevy_ecs::{prelude::*, system::RunSystemOnce};
 use bevy_time::{Time, TimePlugin};
-use inslag_state_tree::{persistence::Checkpoint, prelude::*};
+use inslag_persist::{SavePlugin, WorldSaveExt};
+use inslag_state_tree::prelude::*;
 use std::time::Duration;
 
 fn lifecycle(
@@ -59,6 +60,11 @@ fn app() -> App {
             .run_if(|enabled: Res<ConsumersEnabled>| enabled.0),
     );
     configure(&mut app);
+    app
+}
+fn sqlite_app(directory: &tempfile::TempDir) -> App {
+    let mut app = app();
+    app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")));
     app
 }
 fn definition(updated: bool) -> StateTreeDefinition {
@@ -132,20 +138,19 @@ fn configuration(extra: i64) -> StateTreeConfiguration {
 }
 
 #[test]
-fn checkpoint_only_restores_datamodel_then_enters_current_initial_configuration() {
-    let mut source = app();
+fn load_only_restores_datamodel_then_enters_current_initial_configuration() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut source = sqlite_app(&directory);
     let (owner, _) = spawn(&mut source, definition(false));
     advance(&mut source, owner);
     assert_eq!(data(&source, owner, "counter"), Some(LuauValue::Integer(3)));
-    let checkpoint = Checkpoint::capture(source.world_mut()).unwrap();
-    let bytes = serde_json::to_vec(&checkpoint).unwrap();
-    let checkpoint: Checkpoint = serde_json::from_slice(&bytes).unwrap();
-    let mut target = app();
+    source.world_mut().save().unwrap();
+    let mut target = sqlite_app(&directory);
     target
         .world_mut()
         .resource_mut::<Assets<StateTreeDefinition>>()
         .add(definition(true));
-    checkpoint.restore(target.world_mut()).unwrap();
+    target.world_mut().load().unwrap();
     let entity = target
         .world_mut()
         .query_filtered::<Entity, With<StateTreeInstance>>()
@@ -185,7 +190,8 @@ fn checkpoint_only_restores_datamodel_then_enters_current_initial_configuration(
 
 #[test]
 fn restored_dynamic_timers_evaluate_current_entry_data_and_configuration() {
-    let mut app = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = sqlite_app(&directory);
     let definition = xml(r#"
         <datamodel><data id="entries" expr="0"/></datamodel>
         <state id="waiting">
@@ -199,8 +205,8 @@ fn restored_dynamic_timers_evaluate_current_entry_data_and_configuration() {
         .resource_mut::<Time>()
         .advance_by(Duration::from_secs(1));
     app.world_mut().run_schedule(Update);
-    let checkpoint = Checkpoint::capture(app.world_mut()).unwrap();
-    checkpoint.restore(app.world_mut()).unwrap();
+    app.world_mut().save().unwrap();
+    app.world_mut().load().unwrap();
     let entity = app
         .world_mut()
         .query_filtered::<Entity, With<StateTreeInstance>>()
@@ -310,11 +316,8 @@ fn configuration_change_reconstructs_without_overwriting_persistent_data() {
 
 #[test]
 fn sqlite_restore_restarts_completed_execution_and_replays_current_entry_actions() {
-    use inslag_persist::{SavePlugin, WorldSaveExt};
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("save.sqlite");
-    let mut first = app();
-    first.add_plugins(SavePlugin::sqlite(&path));
+    let mut first = sqlite_app(&directory);
     let (entity, _) = spawn(&mut first, definition(false));
     first
         .world_mut()
@@ -330,8 +333,7 @@ fn sqlite_restore_restarts_completed_execution_and_replays_current_entry_actions
         &InstanceStatus::Complete
     );
     first.world_mut().save().unwrap();
-    let mut second = app();
-    second.add_plugins(SavePlugin::sqlite(&path));
+    let mut second = sqlite_app(&directory);
     second
         .world_mut()
         .resource_mut::<Assets<StateTreeDefinition>>()
@@ -364,15 +366,16 @@ fn sqlite_restore_restarts_completed_execution_and_replays_current_entry_actions
 
 #[test]
 fn boot_routing_is_ordinary_scxml_using_persistent_data() {
-    let mut app = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = sqlite_app(&directory);
     let definition = xml(r#"<datamodel><data id="phase" expr="'idle'"/></datamodel>
       <state id="boot"><transition cond="phase == 'working'" target="working"/><transition target="idle"/></state>
       <state id="idle"><transition event="advance" target="working"><assign location="phase" expr="'working'"/></transition></state>
       <state id="working"/>"#);
     let (entity, _) = spawn(&mut app, definition);
     advance(&mut app, entity);
-    let checkpoint = Checkpoint::capture(app.world_mut()).unwrap();
-    checkpoint.restore(app.world_mut()).unwrap();
+    app.world_mut().save().unwrap();
+    app.world_mut().load().unwrap();
     app.world_mut().run_schedule(Update);
     let entity = app
         .world_mut()
@@ -470,12 +473,13 @@ fn disabled_instances_discard_old_execution_before_they_are_enabled_again() {
 
 #[test]
 fn restore_discards_unconsumed_activity_starts_from_the_outgoing_execution() {
-    let mut app = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = sqlite_app(&directory);
     app.world_mut().resource_mut::<ConsumersEnabled>().0 = false;
     spawn(&mut app, definition(false));
     assert_eq!(app.world().resource::<Starts>().0, 0);
-    let checkpoint = Checkpoint::capture(app.world_mut()).unwrap();
-    checkpoint.restore(app.world_mut()).unwrap();
+    app.world_mut().save().unwrap();
+    app.world_mut().load().unwrap();
     let entity = app
         .world_mut()
         .query_filtered::<Entity, With<StateTreeInstance>>()
@@ -519,7 +523,8 @@ fn reinserting_a_detached_instance_reconstructs_against_current_content() {
 
 #[test]
 fn persistence_is_opt_in_and_restored_instances_keep_their_selection() {
-    let mut source = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut source = sqlite_app(&directory);
     let (saved, handle) = spawn(&mut source, definition(false));
     let runtime = source
         .world_mut()
@@ -527,13 +532,13 @@ fn persistence_is_opt_in_and_restored_instances_keep_their_selection() {
         .id();
     source.world_mut().run_schedule(Update);
     advance(&mut source, runtime);
-    let checkpoint = Checkpoint::capture(source.world_mut()).unwrap();
-    let mut target = app();
+    source.world_mut().save().unwrap();
+    let mut target = sqlite_app(&directory);
     target
         .world_mut()
         .resource_mut::<Assets<StateTreeDefinition>>()
         .add(definition(false));
-    checkpoint.restore(target.world_mut()).unwrap();
+    target.world_mut().load().unwrap();
     let restored = target
         .world_mut()
         .query_filtered::<Entity, With<StateTreeInstance>>()
@@ -557,8 +562,8 @@ fn persistence_is_opt_in_and_restored_instances_keep_their_selection() {
         data(&target, restored, "counter"),
         Some(LuauValue::Integer(2))
     );
-    let repeated = Checkpoint::capture(target.world_mut()).unwrap();
-    repeated.restore(target.world_mut()).unwrap();
+    target.world_mut().save().unwrap();
+    target.world_mut().load().unwrap();
     assert!(
         target
             .world_mut()
@@ -566,7 +571,7 @@ fn persistence_is_opt_in_and_restored_instances_keep_their_selection() {
             .single(target.world())
             .is_ok()
     );
-    checkpoint.restore(source.world_mut()).unwrap();
+    source.world_mut().load().unwrap();
     assert_eq!(
         data(&source, runtime, "counter"),
         Some(LuauValue::Integer(3))
@@ -575,7 +580,8 @@ fn persistence_is_opt_in_and_restored_instances_keep_their_selection() {
 
 #[test]
 fn unmarked_instances_preserve_pending_events_outcomes_and_timer_deadlines() {
-    let mut app = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = sqlite_app(&directory);
     let definition = xml(r#"
       <datamodel><data id="counter" expr="0"/><data id="completed" expr="false"/></datamodel>
       <state id="mounted">
@@ -595,7 +601,7 @@ fn unmarked_instances_preserve_pending_events_outcomes_and_timer_deadlines() {
         .resource_mut::<Time>()
         .advance_by(Duration::from_secs(7));
     app.world_mut().run_schedule(Update);
-    let checkpoint = Checkpoint::capture(app.world_mut()).unwrap();
+    app.world_mut().save().unwrap();
     app.world_mut()
         .run_system_once(
             move |mut writer: EntityStateTreeEventWriter,
@@ -605,7 +611,7 @@ fn unmarked_instances_preserve_pending_events_outcomes_and_timer_deadlines() {
             },
         )
         .unwrap();
-    checkpoint.restore(app.world_mut()).unwrap();
+    app.world_mut().load().unwrap();
     app.world_mut().run_schedule(Update);
     assert_eq!(data(&app, owner, "counter"), Some(LuauValue::Integer(1)));
     assert_eq!(
@@ -627,7 +633,8 @@ fn unmarked_instances_preserve_pending_events_outcomes_and_timer_deadlines() {
 
 #[test]
 fn unmarked_activity_starts_survive_restoring_a_different_saved_selection() {
-    let mut app = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = sqlite_app(&directory);
     app.world_mut().resource_mut::<ConsumersEnabled>().0 = false;
     let definition = xml(
         r#"<state id="mounted"><ist:activity id="job" name="work"><ist:arg name="setting" expr="123"/></ist:activity></state>"#,
@@ -638,8 +645,8 @@ fn unmarked_activity_starts_survive_restoring_a_different_saved_selection() {
         .add(definition);
     let owner = app.world_mut().spawn(StateTreeInstance::new(handle)).id();
     app.world_mut().run_schedule(Update);
-    let checkpoint = Checkpoint::capture(app.world_mut()).unwrap();
-    checkpoint.restore(app.world_mut()).unwrap();
+    app.world_mut().save().unwrap();
+    app.world_mut().load().unwrap();
     app.world_mut().resource_mut::<ConsumersEnabled>().0 = true;
     app.world_mut().run_schedule(Update);
     assert_eq!(app.world().resource::<Starts>().0, 1);
@@ -650,7 +657,8 @@ fn unmarked_activity_starts_survive_restoring_a_different_saved_selection() {
 
 #[test]
 fn unmarked_controllers_do_not_replay_already_consumed_activity_starts() {
-    let mut app = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = sqlite_app(&directory);
     let definition = xml(
         r#"<state id="mounted"><ist:activity id="job" name="work"><ist:arg name="setting" expr="123"/></ist:activity></state>"#,
     );
@@ -662,8 +670,8 @@ fn unmarked_controllers_do_not_replay_already_consumed_activity_starts() {
     app.world_mut().run_schedule(Update);
     assert_eq!(app.world().resource::<Starts>().0, 1);
     let token = app.world().resource::<Runs>().0[0].0;
-    let checkpoint = Checkpoint::capture(app.world_mut()).unwrap();
-    checkpoint.restore(app.world_mut()).unwrap();
+    app.world_mut().save().unwrap();
+    app.world_mut().load().unwrap();
     app.world_mut().run_schedule(Update);
     assert_eq!(app.world().resource::<Starts>().0, 1);
     assert_eq!(app.world().resource::<Runs>().0.len(), 1);

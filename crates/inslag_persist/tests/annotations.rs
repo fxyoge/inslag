@@ -1,9 +1,7 @@
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_transform::components::Transform;
-use inslag_persist::{
-    Checkpoint, LoadOutcome, SavePlugin, SaveRequest, SaveStatus, WorldSaveExt, save,
-};
+use inslag_persist::{Error, LoadOutcome, SavePlugin, SaveRequest, SaveStatus, WorldSaveExt, save};
 use serde::{Deserialize, Serialize};
 
 #[save(resource, key = "tiny.score")]
@@ -100,20 +98,33 @@ fn annotated_game_needs_only_the_plugin_for_fresh_restore_switch_and_close() {
 
 #[test]
 fn failed_restore_leaves_resources_and_entities_intact_without_running_constructors() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("save.sqlite");
     let mut app = app();
+    request(&mut app, SaveRequest::Open(path.clone()));
     app.world_mut().resource_mut::<Score>().0 = 29;
     app.world_mut().resource_mut::<SessionSeed>().0 = 123;
     let actor = app.world_mut().spawn_empty().id();
     app.world_mut()
         .entity_mut(actor)
         .insert(Actor { peer: actor });
-    let checkpoint = Checkpoint::capture(app.world_mut()).unwrap();
+    app.world_mut().save().unwrap();
     let count = app.world().entities().len();
     let constructors = app.world().resource::<Platform>().1;
-    let mut wire = serde_json::to_value(checkpoint).unwrap();
-    wire["data"]["tiny.score"][0][1] = serde_json::json!([123]);
-    let corrupt: Checkpoint = serde_json::from_value(wire).unwrap();
-    assert!(corrupt.restore(app.world_mut()).is_err());
+    rusqlite::Connection::open(path)
+        .unwrap()
+        .execute(
+            "UPDATE records SET payload = ?1 WHERE type_key = 'tiny.score'",
+            [b"invalid".as_slice()],
+        )
+        .unwrap();
+    assert!(matches!(
+        app.world_mut().load(),
+        Err(Error::Decode {
+            key: "tiny.score",
+            ..
+        })
+    ));
     assert_eq!(app.world().resource::<Score>().0, 29);
     assert_eq!(app.world().resource::<SessionSeed>().0, 123);
     assert!(app.world().get::<Actor>(actor).is_some());

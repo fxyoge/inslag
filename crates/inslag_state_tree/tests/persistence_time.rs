@@ -2,11 +2,12 @@
 
 use std::time::Duration;
 
-use bevy_app::{App, TaskPoolPlugin, Update};
+use bevy_app::{App, Last, TaskPoolPlugin, Update};
 use bevy_asset::{AssetPlugin, Assets};
 use bevy_ecs::{prelude::*, system::RunSystemOnce};
 use bevy_time::{Time, TimePlugin};
-use inslag_state_tree::{persistence::Checkpoint, prelude::*};
+use inslag_persist::{Error, SavePlugin, SaveRequest, WorldSaveExt};
+use inslag_state_tree::prelude::*;
 
 const SAMPLER: &str = r#"
     <datamodel>
@@ -52,13 +53,14 @@ struct Sample {
     entity: Entity,
 }
 
-fn app() -> App {
+fn app(directory: &tempfile::TempDir) -> App {
     let mut app = App::new();
     app.add_plugins((
         TaskPoolPlugin::default(),
         TimePlugin,
         AssetPlugin::default(),
         StateTreePlugin::new(Update),
+        SavePlugin::sqlite(directory.path().join("clock.sqlite")),
     ))
     .add_state_tree_event::<Sample>();
     app
@@ -125,14 +127,10 @@ fn clock(app: &App) -> (Duration, Duration) {
     (game.elapsed(time), game.session_elapsed(time))
 }
 
-fn checkpoint(app: &mut App) -> Checkpoint {
-    let checkpoint = Checkpoint::capture(app.world_mut()).unwrap();
-    serde_json::from_slice(&serde_json::to_vec(&checkpoint).unwrap()).unwrap()
-}
-
 #[test]
-fn capture_samples_current_time_without_running_or_changing_the_tree() {
-    let mut app = app();
+fn save_samples_current_time_without_running_or_changing_the_tree() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = app(&directory);
     let entity = spawn(&mut app, "clock", SAMPLER);
     let tree_changed = app
         .world()
@@ -148,6 +146,7 @@ fn capture_samples_current_time_without_running_or_changing_the_tree() {
     for _ in 0..100 {
         advance(&mut app, Duration::from_millis(10));
     }
+    app.world_mut().save().unwrap();
     assert_eq!(number(&app, entity, "game"), -1.);
     assert_eq!(
         app.world()
@@ -164,12 +163,11 @@ fn capture_samples_current_time_without_running_or_changing_the_tree() {
             .last_changed(),
         clock_changed
     );
-    let checkpoint = checkpoint(&mut app);
     assert_eq!(
         clock(&app),
         (Duration::from_secs(1), Duration::from_secs(1))
     );
-    checkpoint.restore(app.world_mut()).unwrap();
+    app.world_mut().load().unwrap();
     let entity = owner(&mut app);
     sample(&mut app, entity);
     assert_eq!(number(&app, entity, "game"), 1.);
@@ -180,18 +178,19 @@ fn capture_samples_current_time_without_running_or_changing_the_tree() {
 
 #[test]
 fn restoring_into_a_fresh_app_uses_saved_game_time_and_a_new_session() {
-    let mut source = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut source = app(&directory);
     spawn(&mut source, "clock", SAMPLER);
     advance(&mut source, Duration::from_secs(103));
-    let checkpoint = checkpoint(&mut source);
+    source.world_mut().save().unwrap();
     for runtime_elapsed in [Duration::ZERO, Duration::from_secs(400)] {
-        let mut target = app();
+        let mut target = app(&directory);
         advance(&mut target, runtime_elapsed);
         target
             .world_mut()
             .resource_mut::<Assets<StateTreeDefinition>>()
             .add(definition("clock", SAMPLER));
-        checkpoint.restore(target.world_mut()).unwrap();
+        target.world_mut().load().unwrap();
         let entity = owner(&mut target);
         sample(&mut target, entity);
         assert_eq!(number(&target, entity, "game"), 103.);
@@ -211,14 +210,15 @@ fn restoring_into_a_fresh_app_uses_saved_game_time_and_a_new_session() {
 
 #[test]
 fn repeated_restore_rewinds_game_time_without_rewinding_bevy_time() {
-    let mut app = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = app(&directory);
     spawn(&mut app, "clock", SAMPLER);
     advance(&mut app, Duration::from_secs(3));
-    let checkpoint = checkpoint(&mut app);
+    app.world_mut().save().unwrap();
     for elapsed in [Duration::from_secs(100), Duration::from_secs(200)] {
         advance(&mut app, elapsed);
         let runtime_elapsed = app.world().resource::<Time>().elapsed();
-        checkpoint.restore(app.world_mut()).unwrap();
+        app.world_mut().load().unwrap();
         assert_eq!(clock(&app), (Duration::from_secs(3), Duration::ZERO));
         assert_eq!(app.world().resource::<Time>().elapsed(), runtime_elapsed);
         let entity = owner(&mut app);
@@ -231,18 +231,19 @@ fn repeated_restore_rewinds_game_time_without_rewinding_bevy_time() {
 #[test]
 fn saved_deadline_rearms_only_its_remaining_duration_after_a_century() {
     let century = Duration::from_secs(100 * 365 * 24 * 60 * 60);
-    let mut source = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut source = app(&directory);
     advance(&mut source, century);
     spawn(&mut source, "deadline", DEADLINE);
     advance(&mut source, Duration::from_secs(3));
-    let checkpoint = checkpoint(&mut source);
-    let mut target = app();
+    source.world_mut().save().unwrap();
+    let mut target = app(&directory);
     advance(&mut target, Duration::from_secs(4));
     target
         .world_mut()
         .resource_mut::<Assets<StateTreeDefinition>>()
         .add(definition("deadline", DEADLINE));
-    checkpoint.restore(target.world_mut()).unwrap();
+    target.world_mut().load().unwrap();
     target.world_mut().run_schedule(Update);
     let entity = owner(&mut target);
     advance(&mut target, Duration::from_millis(6999));
@@ -272,11 +273,12 @@ fn saved_deadline_rearms_only_its_remaining_duration_after_a_century() {
 
 #[test]
 fn overdue_saved_deadline_routes_without_arming_a_zero_duration_timer() {
-    let mut app = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = app(&directory);
     spawn(&mut app, "deadline", DEADLINE);
     advance(&mut app, Duration::from_secs(3));
-    let checkpoint = checkpoint(&mut app);
-    checkpoint.restore(app.world_mut()).unwrap();
+    app.world_mut().save().unwrap();
+    app.world_mut().load().unwrap();
     advance(&mut app, Duration::from_secs(8));
     let entity = owner(&mut app);
     assert_eq!(
@@ -292,13 +294,14 @@ fn overdue_saved_deadline_routes_without_arming_a_zero_duration_timer() {
 
 #[test]
 fn repeated_save_and_load_keeps_integer_nanoseconds_after_a_century() {
-    let mut app = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = app(&directory);
     spawn(&mut app, "clock", SAMPLER);
     let initial = Duration::new(100 * 365 * 24 * 60 * 60, 123_456_789);
     advance(&mut app, initial);
     for _ in 0..10 {
-        let checkpoint = checkpoint(&mut app);
-        checkpoint.restore(app.world_mut()).unwrap();
+        app.world_mut().save().unwrap();
+        app.world_mut().load().unwrap();
         app.world_mut().run_schedule(Update);
     }
     assert_eq!(clock(&app), (initial, Duration::ZERO));
@@ -310,10 +313,13 @@ fn repeated_save_and_load_keeps_integer_nanoseconds_after_a_century() {
 }
 
 #[test]
-fn clearing_a_saved_world_starts_a_new_game_without_resetting_bevy_time() {
-    let mut app = app();
+fn closing_a_save_resets_game_time_without_resetting_bevy_time() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = app(&directory);
     advance(&mut app, Duration::from_secs(50));
-    Checkpoint::clear(app.world_mut());
+    app.world_mut().save().unwrap();
+    app.world_mut().write_message(SaveRequest::Close);
+    app.world_mut().run_schedule(Last);
     assert_eq!(clock(&app), (Duration::ZERO, Duration::ZERO));
     assert_eq!(
         app.world().resource::<Time>().elapsed(),
@@ -328,11 +334,12 @@ fn clearing_a_saved_world_starts_a_new_game_without_resetting_bevy_time() {
 
 #[test]
 fn hot_reload_preserves_game_and_session_time() {
-    let mut app = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = app(&directory);
     spawn(&mut app, "clock", SAMPLER);
     advance(&mut app, Duration::from_secs(10));
-    let checkpoint = checkpoint(&mut app);
-    checkpoint.restore(app.world_mut()).unwrap();
+    app.world_mut().save().unwrap();
+    app.world_mut().load().unwrap();
     let entity = owner(&mut app);
     sample(&mut app, entity);
     advance(&mut app, Duration::from_secs(2));
@@ -373,16 +380,17 @@ fn hot_reload_preserves_game_and_session_time() {
 
 #[test]
 fn restoring_game_time_does_not_change_an_unmarked_trees_existing_timer() {
-    let mut app = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = app(&directory);
     spawn(&mut app, "clock", SAMPLER);
     let entity = spawn(&mut app, "deadline", DEADLINE);
     app.world_mut()
         .entity_mut(entity)
         .remove::<PersistStateTree>();
     advance(&mut app, Duration::from_secs(3));
-    let checkpoint = checkpoint(&mut app);
+    app.world_mut().save().unwrap();
     advance(&mut app, Duration::from_secs(4));
-    checkpoint.restore(app.world_mut()).unwrap();
+    app.world_mut().load().unwrap();
     advance(&mut app, Duration::from_millis(2999));
     assert_eq!(
         app.world()
@@ -404,18 +412,13 @@ fn restoring_game_time_does_not_change_an_unmarked_trees_existing_timer() {
 
 #[test]
 fn sqlite_load_restores_the_clock_before_the_first_tree_initializes() {
-    use inslag_persist::{SavePlugin, WorldSaveExt};
-
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("clock.sqlite");
-    let mut source = app();
-    source.add_plugins(SavePlugin::sqlite(&path));
+    let mut source = app(&directory);
     spawn(&mut source, "deadline", DEADLINE);
     advance(&mut source, Duration::from_secs(3));
     source.world_mut().save().unwrap();
 
-    let mut target = app();
-    target.add_plugins(SavePlugin::sqlite(&path));
+    let mut target = app(&directory);
     target
         .world_mut()
         .resource_mut::<Assets<StateTreeDefinition>>()
@@ -432,15 +435,19 @@ fn sqlite_load_restores_the_clock_before_the_first_tree_initializes() {
 
 #[test]
 fn failed_restore_leaves_the_outgoing_game_and_session_time_unchanged() {
-    let mut source = app();
+    let directory = tempfile::tempdir().unwrap();
+    let mut source = app(&directory);
     spawn(&mut source, "missing", SAMPLER);
     advance(&mut source, Duration::from_secs(3));
-    let checkpoint = checkpoint(&mut source);
+    source.world_mut().save().unwrap();
 
-    let mut target = app();
+    let mut target = app(&directory);
     let entity = spawn(&mut target, "outgoing", SAMPLER);
     advance(&mut target, Duration::from_secs(40));
-    assert!(checkpoint.restore(target.world_mut()).is_err());
+    assert!(matches!(
+        target.world_mut().load(),
+        Err(Error::AssetNotReady(_))
+    ));
     assert_eq!(
         clock(&target),
         (Duration::from_secs(40), Duration::from_secs(40))

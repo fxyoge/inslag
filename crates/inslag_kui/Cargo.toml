@@ -23,6 +23,8 @@ quick-xml.workspace = true
 [dev-dependencies]
 bevy = { workspace = true, features = ["default_app", "2d_bevy_render", "ui_bevy_render", "bevy_winit", "default_font", "png", "x11", "multi_threaded"] }
 divan.workspace = true
+inslag_persist.workspace = true
+tempfile.workspace = true
 
 [[bench]]
 name = "execution"

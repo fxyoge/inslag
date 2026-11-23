@@ -798,11 +798,16 @@ mod tests {
 
     #[cfg(feature = "persistence")]
     #[test]
-    fn checkpoint_reconstructs_views_from_datamodel_and_discards_pending_actions() {
-        use inslag_state_tree::persistence::Checkpoint;
+    fn restore_reconstructs_views_from_datamodel_and_discards_pending_actions() {
+        use inslag_persist::{SavePlugin, WorldSaveExt};
+        let directory = tempfile::tempdir().unwrap();
         let source = format!(r#"{HEADER}<node><text bind:text="received"/></node></view>"#);
         let mut app = test_support::app(&[("saved.kui", &source)]);
-        app.add_plugins((StateTreePlugin::new(Update), KuiStateTreePlugin));
+        app.add_plugins((
+            StateTreePlugin::new(Update),
+            KuiStateTreePlugin,
+            SavePlugin::sqlite(directory.path().join("save.sqlite")).load_on_start(false),
+        ));
         let owner = spawn(&mut app, "saved.kui");
         app.world_mut()
             .entity_mut(owner)
@@ -816,8 +821,8 @@ mod tests {
         send(&mut app, owner, "saved-action");
         app.update();
         send(&mut app, owner, "discarded-action");
-        let checkpoint = Checkpoint::capture(app.world_mut()).unwrap();
-        checkpoint.restore(app.world_mut()).unwrap();
+        app.world_mut().save().unwrap();
+        app.world_mut().load().unwrap();
         let owner = app
             .world_mut()
             .query::<(Entity, &StateTreeInstance)>()

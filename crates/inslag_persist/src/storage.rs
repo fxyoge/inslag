@@ -486,10 +486,7 @@ fn read_manifest(connection: &Connection) -> Result<BTreeMap<String, i64>, Error
         .collect::<Result<BTreeMap<_, _>, _>>()?)
 }
 
-pub(crate) fn check_load_manifest(
-    actual: &BTreeMap<String, i64>,
-    registry: &Registry,
-) -> Result<(), Error> {
+fn check_load_manifest(actual: &BTreeMap<String, i64>, registry: &Registry) -> Result<(), Error> {
     for (key, kind) in actual {
         if !registry
             .entries
@@ -502,7 +499,7 @@ pub(crate) fn check_load_manifest(
     Ok(())
 }
 
-pub(crate) fn restore_records(
+fn restore_records(
     world: &mut World,
     registry: &mut Registry,
     saved_ids: Vec<i64>,

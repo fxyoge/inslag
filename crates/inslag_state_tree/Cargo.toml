@@ -56,7 +56,7 @@ harness = false
 required-features = ["persistence"]
 
 [[bench]]
-name = "checkpoint_frames"
+name = "save_frames"
 harness = false
 required-features = ["persistence"]
 

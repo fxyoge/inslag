@@ -69,12 +69,10 @@ mod plugins;
 pub use plugins::SavePlugin;
 
 pub mod adapter;
-mod checkpoint;
 mod identity;
 mod lifecycle;
 mod registration;
 mod storage;
-pub use checkpoint::Checkpoint;
 pub use inslag_persist_macros::save;
 extern crate self as inslag_persist;
 

@@ -1,15 +1,9 @@
-//! End-to-end synchronous checkpoint cost, including SQLite FULL durability.
-//! This is a payload-size probe, not a substitute for profiling the consuming game.
-//! Run with `cargo bench --features persistence --bench checkpoint_frames`.
 use bevy_app::{App, TaskPoolPlugin, Update};
 use bevy_asset::{AssetPlugin, Assets};
 use bevy_ecs::prelude::*;
 use bevy_time::TimePlugin;
 use inslag_persist::{SavePlugin, WorldSaveExt};
-use inslag_state_tree::{
-    persistence::{AppPersistenceExt, Checkpoint},
-    prelude::*,
-};
+use inslag_state_tree::{persistence::AppPersistenceExt, prelude::*};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
@@ -29,8 +23,6 @@ fn main() {
         app.world_mut().save().unwrap();
         let mut idle = Vec::new();
         let mut saves = Vec::new();
-        let mut captures = Vec::new();
-        let mut encodes = Vec::new();
         let mut payload_bytes = 0;
         // Setup and the initial commit are excluded; save frames are reported
         // separately so a rare stall cannot hide in the overall median.
@@ -41,12 +33,6 @@ fn main() {
                 let stats = app.world_mut().save().unwrap();
                 saves.push(start.elapsed());
                 payload_bytes = stats.bytes;
-                let start = Instant::now();
-                let checkpoint = Checkpoint::capture(app.world_mut()).unwrap();
-                captures.push(start.elapsed());
-                let start = Instant::now();
-                std::hint::black_box(serde_json::to_vec(&checkpoint).unwrap());
-                encodes.push(start.elapsed());
             } else {
                 idle.push(start.elapsed());
             }
@@ -54,8 +40,6 @@ fn main() {
         println!("sheets={sheets} payload_bytes={payload_bytes}");
         report(sheets, "idle-update", &mut idle);
         report(sheets, "save-update", &mut saves);
-        report(sheets, "capture", &mut captures);
-        report(sheets, "outer-encode", &mut encodes);
     }
 }
 

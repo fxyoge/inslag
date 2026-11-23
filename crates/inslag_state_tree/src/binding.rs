@@ -697,10 +697,14 @@ mod tests {
 
     #[cfg(feature = "persistence")]
     #[test]
-    fn binding_checkpoint_rebuilds_listener_and_delivers_a_fresh_initial_sample() {
-        use crate::persistence::{AppPersistenceExt, Checkpoint};
+    fn binding_restore_rebuilds_listener_and_delivers_a_fresh_initial_sample() {
+        use inslag_persist::{AppSaveExt, SavePlugin, WorldSaveExt};
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("save.sqlite");
         let mut source = binding_app();
-        source.persist_resource::<SampleSource>("sample-source");
+        source
+            .add_plugins(SavePlugin::sqlite(&path).load_on_start(false))
+            .persist_resource::<SampleSource>("sample-source");
         let handle = source
             .world_mut()
             .resource_mut::<Assets<StateTreeDefinition>>()
@@ -712,14 +716,16 @@ mod tests {
         source.update();
         source.update();
         assert_binding_data(source.world(), original, 1, "idle", "first");
-        let checkpoint = Checkpoint::capture(source.world_mut()).unwrap();
+        source.world_mut().save().unwrap();
         let mut target = binding_app();
-        target.persist_resource::<SampleSource>("sample-source");
+        target
+            .add_plugins(SavePlugin::sqlite(&path).load_on_start(false))
+            .persist_resource::<SampleSource>("sample-source");
         target
             .world_mut()
             .resource_mut::<Assets<StateTreeDefinition>>()
             .add(binding_definition());
-        checkpoint.restore(target.world_mut()).unwrap();
+        target.world_mut().load().unwrap();
         let restored = target
             .world_mut()
             .query_filtered::<Entity, bevy_ecs::prelude::With<StateTreeInstance>>()

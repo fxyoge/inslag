@@ -2,7 +2,7 @@
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 pub(crate) use inslag_persist::adapter::Apply;
-pub use inslag_persist::{AppSaveExt as AppPersistenceExt, Checkpoint, Error};
+pub use inslag_persist::{AppSaveExt as AppPersistenceExt, Error};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 

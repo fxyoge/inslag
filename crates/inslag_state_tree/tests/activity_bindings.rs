@@ -500,8 +500,11 @@ fn terminal_outcomes_release_bindings_without_requiring_a_state_exit() {
 
 #[cfg(feature = "persistence")]
 #[test]
-fn checkpoint_reconstructs_bindings_without_a_lifecycle_queue() {
+fn restore_reconstructs_bindings_without_a_lifecycle_queue() {
+    use inslag_persist::{SavePlugin, WorldSaveExt};
+    let directory = tempfile::tempdir().unwrap();
     let mut app = app();
+    app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")).load_on_start(false));
     app.add_state_tree_activity(
         Activity::<Work>::new("work")
             .with_collection()
@@ -524,8 +527,8 @@ fn checkpoint_reconstructs_bindings_without_a_lifecycle_queue() {
         .get_mut(previous)
         .unwrap()
         .amount = 99;
-    let checkpoint = inslag_state_tree::persistence::Checkpoint::capture(app.world_mut()).unwrap();
-    checkpoint.restore(app.world_mut()).unwrap();
+    app.world_mut().save().unwrap();
+    app.world_mut().load().unwrap();
     app.update();
     let (owner, runs) = app
         .world_mut()

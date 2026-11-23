@@ -236,9 +236,10 @@ mod tests {
 
     #[cfg(feature = "persistence")]
     #[test]
-    fn running_spawn_checkpoint_reconstructs_child_and_preserves_cancellation() {
-        use crate::persistence::Checkpoint;
-        let mut app = app();
+    fn restoring_running_spawn_reconstructs_child_and_preserves_cancellation() {
+        use inslag_persist::WorldSaveExt;
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = sqlite_app(&directory);
         let parent = spawn_parent(&mut app, "loaded.scxml", Some(Duration::from_secs(1)));
         app.world_mut()
             .entity_mut(parent)
@@ -254,8 +255,8 @@ mod tests {
             };
             (run.token, child)
         };
-        let checkpoint = Checkpoint::capture(app.world_mut()).unwrap();
-        checkpoint.restore(app.world_mut()).unwrap();
+        app.world_mut().save().unwrap();
+        app.world_mut().load().unwrap();
         update_state_trees(&mut app);
         update_state_trees(&mut app);
         update_state_trees(&mut app);
@@ -279,16 +280,17 @@ mod tests {
 
     #[cfg(feature = "persistence")]
     #[test]
-    fn loading_spawn_checkpoint_does_not_duplicate_or_skip_child_creation() {
-        use crate::persistence::Checkpoint;
-        let mut app = app();
+    fn restoring_loading_spawn_does_not_duplicate_or_skip_child_creation() {
+        use inslag_persist::WorldSaveExt;
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = sqlite_app(&directory);
         let parent = spawn_parent(&mut app, "loaded.scxml", None);
         app.world_mut()
             .entity_mut(parent)
             .insert(crate::PersistStateTree);
         app.update();
-        let checkpoint = Checkpoint::capture(app.world_mut()).unwrap();
-        checkpoint.restore(app.world_mut()).unwrap();
+        app.world_mut().save().unwrap();
+        app.world_mut().load().unwrap();
         assert_eq!(app.world().resource::<SpawnRuns>().runs.len(), 1);
         insert_for_run(&mut app, running_child_definition());
         update_state_trees(&mut app);
@@ -300,9 +302,10 @@ mod tests {
     #[cfg(feature = "persistence")]
     #[test]
     fn restored_loading_run_detects_failure_even_without_the_old_failure_message() {
-        use crate::persistence::Checkpoint;
-        let mut app = app();
-        let path = "checkpoint-missing-child.scxml";
+        use inslag_persist::WorldSaveExt;
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = sqlite_app(&directory);
+        let path = "missing-child-after-load.scxml";
         let parent = spawn_parent(&mut app, path, None);
         app.world_mut()
             .entity_mut(parent)
@@ -330,7 +333,7 @@ mod tests {
                 .get_load_state(handle.id()),
             Some(bevy_asset::LoadState::Failed(_))
         ));
-        // Model a loading checkpoint after the asset subsystem has delivered
+        // Model a save made after the asset subsystem has delivered
         // and retired its notification. Persistent loading state must suffice.
         let token = app.world().resource::<SpawnRuns>().runs[0].token;
         app.world_mut().resource_mut::<SpawnRuns>().runs = vec![SpawnRun {
@@ -349,8 +352,8 @@ mod tests {
             .resource_mut::<bevy_ecs::message::Messages<AssetLoadFailedEvent<StateTreeDefinition>>>(
             )
             .clear();
-        let checkpoint = Checkpoint::capture(app.world_mut()).unwrap();
-        checkpoint.restore(app.world_mut()).unwrap();
+        app.world_mut().save().unwrap();
+        app.world_mut().load().unwrap();
         update_state_trees(&mut app);
         update_state_trees(&mut app);
         for _ in 0..1_000 {
@@ -524,6 +527,16 @@ mod tests {
             },
             crate::StateTreePlugin::new(Update),
         ));
+        app
+    }
+
+    #[cfg(feature = "persistence")]
+    fn sqlite_app(directory: &tempfile::TempDir) -> App {
+        let mut app = app();
+        app.add_plugins(
+            inslag_persist::SavePlugin::sqlite(directory.path().join("save.sqlite"))
+                .load_on_start(false),
+        );
         app
     }
 
