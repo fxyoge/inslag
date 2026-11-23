@@ -54,7 +54,7 @@ impl NumericExpression {
         }
         // Also validate with the actual Luau compiler, keeping parser extensions
         // from accidentally accepting a language the VM would reject.
-        mlua::Compiler::new()
+        mlua::chunk::Compiler::new()
             .compile(format!("return ({source})"))
             .map_err(|e| e.to_string())?;
         let ast = full_moon::parse(&format!("return ({source})"))

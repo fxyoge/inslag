@@ -121,7 +121,10 @@ use std::{
 };
 
 use full_moon::visitors::Visitor;
-use mlua::{ChunkMode, Compiler, Function, IntoLua, Lua, Table, Value};
+use mlua::{
+    Function, IntoLua, Lua, Table, Value,
+    chunk::{ChunkMode, Compiler},
+};
 
 const FUNCTION_CACHE_CAPACITY: usize = 256;
 
