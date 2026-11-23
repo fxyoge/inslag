@@ -15,7 +15,7 @@ components = ["clippy", "rustfmt"]
 tools."cargo:dylint-link" = "6.3.2"
 
 [task_templates.persist-sql]
-dir = "crates/inslag_persist"
+dir = "crates/inslag_persist/src/backend/sqlite"
 tools."github:sqlc-dev/sqlc" = "1.31.1"
 
 [tasks.bench]
@@ -80,12 +80,12 @@ run = "cargo fmt --all --check"
 [tasks."generate:persist-sql"]
 description = "Generate Rust bindings for inslag_persist SQLite queries"
 extends = "persist-sql"
-run = "bash tools/sqlc.sh"
+run = "bash sqlc.sh"
 
 [tasks."lint:persist-sql"]
 hide = true
 extends = "persist-sql"
-run = "bash tools/sqlc.sh --check"
+run = "bash sqlc.sh --check"
 
 [tasks."lint:clippy"]
 hide = true

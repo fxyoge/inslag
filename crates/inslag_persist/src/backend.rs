@@ -3,14 +3,13 @@ use bevy_ecs::prelude::Resource;
 use std::{
     collections::BTreeMap,
     num::NonZeroI64,
-    path::PathBuf,
     sync::{
         Mutex,
         mpsc::{self, Receiver, RecvError, Sender, TryRecvError},
     },
 };
 
-mod migrations;
+#[cfg(feature = "sqlite")]
 mod sqlite;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,10 +108,6 @@ impl From<RecvError> for Error {
 pub(crate) struct Storage(Box<dyn Backend>);
 
 impl Storage {
-    pub(crate) fn sqlite(directory: PathBuf) -> Self {
-        Self(Box::new(sqlite::Sqlite::new(directory)))
-    }
-
     pub(crate) fn commit(
         &self,
         handle: SaveHandle,

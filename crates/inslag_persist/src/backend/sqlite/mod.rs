@@ -1,7 +1,8 @@
 use super::{
     Backend, Batch, Error, Manifest, Pending, RecordOwner, Records, Role, SaveBundle, SaveHandle,
-    SaveInfo, SaveStats, StoredSave, WriteMode,
+    SaveInfo, SaveStats, Storage, StoredSave, WriteMode,
 };
+use crate::SavePlugin;
 use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use std::{
     fs,
@@ -12,6 +13,7 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
+mod migrations;
 // Unused helpers and broader visibility are emitted by the plugin.
 #[allow(dead_code, unreachable_pub, unused_variables, clippy::all)]
 mod queries;
@@ -21,13 +23,25 @@ mod tests;
 
 use queries::*;
 
+impl SavePlugin {
+    pub fn sqlite(directory: impl AsRef<Path>) -> Self {
+        let directory = directory.as_ref().to_owned();
+        Self::new(move || {
+            Storage(Box::new(Sqlite {
+                directory: directory.clone(),
+                worker: Mutex::default(),
+            }))
+        })
+    }
+}
+
 impl From<rusqlite::Error> for Error {
     fn from(error: rusqlite::Error) -> Self {
         Self::Io(Box::new(error))
     }
 }
 
-pub(super) struct Sqlite {
+struct Sqlite {
     directory: PathBuf,
     worker: Mutex<Option<mpsc::Sender<Job>>>,
 }
@@ -46,13 +60,6 @@ struct Database {
 }
 
 impl Sqlite {
-    pub(super) fn new(directory: PathBuf) -> Self {
-        Self {
-            directory,
-            worker: Mutex::default(),
-        }
-    }
-
     fn submit<T: Send + 'static>(
         &self,
         operation: impl FnOnce(&mut Collection) -> Result<T, Error> + Send + 'static,

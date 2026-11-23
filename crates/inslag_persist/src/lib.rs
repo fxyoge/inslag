@@ -6,6 +6,8 @@
 //! # Save resources and components
 //!
 //! ```no_run
+//! # #[cfg(feature = "sqlite")]
+//! # {
 //! use bevy_app::App;
 //! use bevy_ecs::prelude::*;
 //! use inslag_persist::{save, SavePlugin, SaveRequest};
@@ -28,6 +30,7 @@
 //! app.world_mut().spawn(Health(100));
 //! app.world_mut().write_message(SaveRequest::Save);
 //! app.update();
+//! # }
 //! ```
 //!
 //! For a new save, resources are initialized with [`FromWorld`] or [`Default`].
@@ -43,6 +46,8 @@
 //! before enabling it:
 //!
 //! ```no_run
+//! # #[cfg(feature = "sqlite")]
+//! # {
 //! use bevy_app::App;
 //! use bevy_time::TimePlugin;
 //! use inslag_persist::SavePlugin;
@@ -51,6 +56,7 @@
 //! let mut app = App::new();
 //! app.add_plugins(TimePlugin)
 //!     .add_plugins(SavePlugin::sqlite("saves").autosave(Duration::from_secs(30)));
+//! # }
 //! ```
 //!
 //! The interval uses real time, so pausing the simulation does not pause autosave.
@@ -58,6 +64,10 @@ mod plugins;
 pub use plugins::SavePlugin;
 
 pub mod adapter;
+#[cfg_attr(
+    not(feature = "sqlite"),
+    allow(dead_code, reason = "no backend enabled")
+)]
 mod backend;
 mod identity;
 mod lifecycle;

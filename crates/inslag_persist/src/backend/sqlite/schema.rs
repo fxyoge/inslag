@@ -1,7 +1,5 @@
-use crate::{
-    Error,
-    backend::migrations::{Migration, pending},
-};
+use super::migrations::{Migration, pending};
+use crate::Error;
 use rusqlite::{Connection, Transaction};
 
 pub(super) const APPLICATION_ID: i64 = 0x494E_5350;
@@ -9,10 +7,10 @@ pub(super) const APPLICATION_ID: i64 = 0x494E_5350;
 pub(super) const INITIAL: Migration<&str> = Migration {
     revision: 1,
     name: "0001_initial.up.sql",
-    step: include_str!("../../../sqlite/migrations/0001_initial.up.sql"),
+    step: include_str!("migrations/0001_initial.up.sql"),
 };
 pub(super) const CURRENT: Schema = Schema(&[INITIAL]);
-const UNCLAIMED: &str = include_str!("../../../sqlite/unclaimed.sql");
+const UNCLAIMED: &str = include_str!("unclaimed.sql");
 
 #[derive(Clone, Copy)]
 pub(super) struct Schema(pub(super) &'static [Migration<&'static str>]);
@@ -71,7 +69,7 @@ mod tests {
 
     #[test]
     fn runtime_history_matches_sqlc_migration_directory() {
-        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("sqlite/migrations");
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/backend/sqlite/migrations");
         let mut files: Vec<_> = fs::read_dir(&directory)
             .unwrap()
             .map(|entry| entry.unwrap().file_name().into_string().unwrap())

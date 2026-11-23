@@ -1,6 +1,5 @@
 use bevy_app::{Last, PreStartup};
 use bevy_time::{Real, Time};
-use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::{
@@ -9,15 +8,19 @@ use crate::{
 };
 
 pub struct SavePlugin {
-    directory: PathBuf,
+    storage: Box<dyn Fn() -> Storage + Send + Sync>,
     interval: Option<Duration>,
     readiness: Option<ConfigureReadiness>,
 }
 
 impl SavePlugin {
-    pub fn sqlite(directory: impl AsRef<Path>) -> Self {
+    #[cfg_attr(
+        not(feature = "sqlite"),
+        expect(dead_code, reason = "no backend enabled")
+    )]
+    pub(crate) fn new(storage: impl Fn() -> Storage + Send + Sync + 'static) -> Self {
         Self {
-            directory: directory.as_ref().to_owned(),
+            storage: Box::new(storage),
             interval: None,
             readiness: None,
         }
@@ -54,7 +57,7 @@ impl Plugin for SavePlugin {
         app.init_resource::<identity::Identities>()
             .init_resource::<registration::Registry>()
             .init_resource::<SaveStatus>()
-            .insert_resource(Storage::sqlite(self.directory.clone()));
+            .insert_resource((self.storage)());
         assert!(
             self.interval.is_none() || app.world().contains_resource::<Time<Real>>(),
             "autosave requires TimePlugin before SavePlugin"

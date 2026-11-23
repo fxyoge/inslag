@@ -10,6 +10,6 @@ sql:
     queries: queries
     codegen:
       - plugin: sqlc-gen-rust
-        out: ../src/backend/sqlite
+        out: "."
         options:
           db_crate: rusqlite

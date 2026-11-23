@@ -1,5 +1,15 @@
+use super::migrations::Migration;
 use super::*;
-use crate::backend::{Record, migrations::Migration};
+use crate::{
+    AppSaveExt, Capture,
+    backend::Record,
+    component,
+    storage::{begin_save, start_fresh},
+};
+use bevy_app::App;
+use bevy_ecs::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
 const V2: Migration<&str> = Migration {
     revision: 2,
@@ -155,4 +165,66 @@ fn legacy_file_is_not_listed_or_modified() {
         Err(Error::Format)
     ));
     assert_eq!(fs::read(&database.path).unwrap(), original);
+}
+
+#[test]
+fn commit_uses_captured_records_and_entity_membership() {
+    #[derive(Component, Serialize, Deserialize)]
+    struct Value(u32);
+
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = App::new();
+    app.add_plugins(SavePlugin::sqlite(directory.path()))
+        .persist(component::<Value>("value").capture(Capture::Dirty));
+    let world = app.world_mut();
+    start_fresh(world);
+    let removed = world.spawn(Value(1)).id();
+    let mut saving = begin_save(world, HANDLE).unwrap();
+    let result = complete(&mut saving.pending);
+    saving.finish(world, &result);
+    assert_eq!(result.unwrap().generation, 1);
+
+    world.despawn(removed);
+    let added = world.spawn(Value(2)).id();
+    let mut saving = begin_save(world, HANDLE).unwrap();
+    world.despawn(added);
+    world.spawn(Value(3));
+    let result = complete(&mut saving.pending);
+    saving.finish(world, &result);
+    let stats = result.unwrap();
+    assert_eq!((stats.generation, stats.entities, stats.upserts), (2, 1, 1));
+
+    let saved = slot(directory.path(), schema::CURRENT).read().unwrap();
+    let [(owner, bytes)] = saved.records["value"].as_slice() else {
+        panic!("expected one saved value");
+    };
+    assert_eq!(saved.entities, [owner.entity_id().unwrap()]);
+    assert_eq!(serde_json::from_slice::<Value>(bytes).unwrap().0, 2);
+}
+
+#[test]
+fn aborted_first_commit_does_not_publish_creation_metadata() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut database = slot(directory.path(), schema::CURRENT);
+    let mut bundle = write(0, b"value");
+    bundle.batch.upserts[0].references.push(i64::MAX);
+    assert!(database.commit(bundle).is_err());
+    assert!(list(directory.path()).unwrap().is_empty());
+
+    assert_eq!(database.commit(write(0, b"value")).unwrap().generation, 1);
+    let saves = list(directory.path()).unwrap();
+    assert_eq!(saves.len(), 1);
+    assert_eq!(saves[0].handle, HANDLE);
+    assert!(saves[0].created_at > UNIX_EPOCH);
+}
+
+fn complete<T>(pending: &mut Pending<T>) -> Result<T, Error> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(result) = pending.poll() {
+            return result;
+        }
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
 }

@@ -399,7 +399,9 @@ fn list_returns_creation_metadata_and_ignores_unfinished_databases() {
         connection.pragma_update(None, pragma, value).unwrap();
     }
     connection
-        .execute_batch(include_str!("../sqlite/migrations/0001_initial.up.sql"))
+        .execute_batch(include_str!(
+            "../src/backend/sqlite/migrations/0001_initial.up.sql"
+        ))
         .unwrap();
     std::fs::write(directory.path().join("notes.txt"), b"not a save").unwrap();
     let mut reader = app(directory.path());

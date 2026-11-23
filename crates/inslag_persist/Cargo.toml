@@ -7,6 +7,10 @@ description = "Typed, benchmark-driven SQLite saves for Bevy"
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = ["sqlite"]
+sqlite = ["dep:rusqlite"]
+
 [dependencies]
 inslag_persist_macros.workspace = true
 inventory.workspace = true
@@ -16,7 +20,7 @@ bevy_transform = { workspace = true, features = ["serialize"] }
 bevy_asset.workspace = true
 bevy_time.workspace = true
 getrandom = "0.4"
-rusqlite.workspace = true
+rusqlite = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -25,25 +29,46 @@ thiserror.workspace = true
 divan.workspace = true
 tempfile.workspace = true
 
+[[example]]
+name = "headless"
+required-features = ["sqlite"]
+
+[[test]]
+name = "annotations"
+required-features = ["sqlite"]
+
+[[test]]
+name = "lifecycle"
+required-features = ["sqlite"]
+
+[[test]]
+name = "persistence"
+required-features = ["sqlite"]
+
 [[bench]]
 name = "snapshot"
 harness = false
+required-features = ["sqlite"]
 
 [[bench]]
 name = "changed"
 harness = false
+required-features = ["sqlite"]
 
 [[bench]]
 name = "explicit_dirty"
 harness = false
+required-features = ["sqlite"]
 
 [[bench]]
 name = "mixed"
 harness = false
+required-features = ["sqlite"]
 
 [[bench]]
 name = "lifecycle"
 harness = false
+required-features = ["sqlite"]
 
 [lints]
 workspace = true
