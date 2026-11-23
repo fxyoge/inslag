@@ -23,16 +23,17 @@ jobs:
     name: Formatting
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    env:
-      RUSTUP_TOOLCHAIN: stable
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
-    - name: Install Rust
-      run: rustup toolchain install stable --profile minimal --component rustfmt --no-self-update
+    - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+      with:
+        version: '2026.11.10'
+        install_args: rust
+        cache: false
     - name: Check formatting
-      run: cargo fmt --all -- --check
+      run: mise run lint:fmt
 
   test:
     name: Workspace (${{ matrix.os }}, Rust ${{ matrix.rust }}, ${{ matrix.features }} features)
@@ -53,7 +54,7 @@ jobs:
           clippy: true
           docs: true
         - os: ubuntu-latest
-          rust: '1.97.1'
+          rust: msrv
           features: all
           clippy: false
           docs: false
@@ -68,7 +69,6 @@ jobs:
           clippy: false
           docs: false
     env:
-      RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
       RUSTDOCFLAGS: -D warnings
       # Full Bevy debug artifacts can exhaust the hosted runner's disk during linking.
       CARGO_PROFILE_DEV_DEBUG: 0
@@ -80,28 +80,30 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
-    - name: Install Rust
-      run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --no-self-update
-    - name: Install Clippy
-      if: matrix.clippy
-      run: rustup component add clippy --toolchain "$RUSTUP_TOOLCHAIN"
+    - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+      with:
+        version: '2026.11.10'
+        mise_env: ${{ matrix.rust == 'msrv' && 'msrv' || '' }}
+        install_args: rust
+        cache: false
     - name: Install audio dependencies
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y libasound2-dev
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
         key: test-${{ matrix.features }}
+        cmd-format: mise exec -- {0}
         cache-on-failure: true
     - name: Clippy
       if: matrix.clippy
-      run: cargo clippy --timings --locked --workspace --all-targets ${{ matrix.features == 'all' && '--all-features' || '' }} -- -D warnings
+      run: mise run lint:clippy --timings ${{ matrix.features == 'all' && '--all-features' || '' }}
     - name: Run tests and doctests
-      run: cargo test --timings --locked --workspace ${{ matrix.features == 'all' && '--all-features' || '' }}
+      run: mise run test:workspace --timings ${{ matrix.features == 'all' && '--all-features' || '' }}
     - name: Smoke-test benchmarks
-      run: cargo test --timings --locked --workspace ${{ matrix.features == 'all' && '--all-features' || '' }}
+      run: mise run test:workspace --timings ${{ matrix.features == 'all' && '--all-features' || '' }}
     - name: Build documentation
       if: matrix.docs
-      run: cargo doc --timings --locked --workspace --no-deps --all-features
+      run: mise run docs:workspace --timings --all-features
     - name: Report runner resources on failure
       if: failure() && runner.os == 'Linux'
       run: |
@@ -131,28 +133,29 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
-    - name: Install Rust
-      run: rustup show active-toolchain
+    - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+      with:
+        version: '2026.11.10'
+        install_args: rust
+        cache: false
+    - name: Install the lint toolchain
+      run: mise run lint:toolchain
     - name: Install audio dependencies
       run: sudo apt-get update && sudo apt-get install -y libasound2-dev
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
-        key: dylint
+        key: dylint-${{ hashFiles('mise.toml') }}
+        cmd-format: mise exec -- {0}
         cache-on-failure: true
-    - name: Install dylint
-      run: cargo install cargo-dylint dylint-link --version 6.3.2 --locked
-    - name: Check lint formatting
-      working-directory: lints
-      run: cargo fmt --all --check
-    - name: Clippy for lints
-      working-directory: lints
-      run: cargo clippy --locked --lib --tests -- -D warnings
+        cache-directories: |
+          ~/.local/share/mise/installs/cargo-cargo-dylint
+          ~/.local/share/mise/installs/cargo-dylint-link
+    - name: Check lint formatting and Clippy
+      run: mise run lint:lints
     - name: Test lints
-      working-directory: lints
-      run: cargo test --locked --lib
+      run: mise run test:lints
     - name: Dylint
-      working-directory: .
-      run: cargo dylint --all --fail-on-no-libraries -- --timings --workspace --all-targets --locked --config 'build.rustflags=["-Dwarnings","-Zalways-encode-mir"]'
+      run: mise run lint:dylint --timings
     - name: Upload build timings
       if: always()
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

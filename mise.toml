@@ -1,5 +1,127 @@
+min_version = "2026.10.5"
+
+[settings]
+idiomatic_version_file_enable_tools = ["rust"]
+
 [tools]
-just = "1.59.0"
-"cargo:cargo-fuzz" = "0.13.2"
-"cargo:cargo-dylint" = "6.4.0"
-"cargo:dylint-link" = "6.4.0"
+watchexec = { version = "2.8.0", lazy = true }
+
+[tools.rust]
+version = "stable"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
+
+[task_templates.dylint-link]
+tools."cargo:dylint-link" = "6.3.2"
+
+[tasks.bench]
+description = "Run the Rust benchmarks"
+run = [
+  "cargo bench -p inslag_kui --bench execution",
+  "cargo bench -p inslag_kui --bench allocation",
+  "cargo bench -p inslag_loot --bench execution",
+  "cargo bench -p inslag_luau --bench expressions",
+  "cargo bench -p inslag_persist",
+  "cargo bench -p inslag_state_tree --all-features",
+]
+
+[tasks.docs]
+description = "Build and serve Rust docs on port 8000"
+depends = ["docs:build"]
+run = [{ tasks = ["docs:serve", "docs:watch"] }]
+
+[tasks."docs:build"]
+hide = true
+sources = ["Cargo.toml", "Cargo.lock", "crates/**", "!**/target/**"]
+outputs = ["target-docs/doc"]
+run = [{ task = "docs:workspace", args = ["--target-dir", "target-docs"] }]
+
+[tasks."docs:serve"]
+hide = true
+tools.python = "3.14"
+run = "python -u -m http.server 8000 --directory target-docs/doc"
+
+[tasks."docs:watch"]
+hide = true
+run = "mise watch --on-busy-update=queue --shell=none docs:build"
+
+[tasks."docs:workspace"]
+hide = true
+run = "cargo doc --workspace --no-deps --locked"
+
+[tasks."fuzz:loot"]
+description = "Fuzz the loot format parser"
+dir = "crates/inslag_format_loot"
+tools.rust = { version = "nightly-2026-08-20", profile = "minimal" }
+tools."cargo:cargo-fuzz" = "0.13.2"
+run = "cargo fuzz run parse"
+
+[tasks.lint]
+description = "Run formatting, Clippy, and Dylint checks"
+run = [
+  { task = "lint:fmt" },
+  { task = "lint:clippy" },
+  { task = "lint:clippy", args = [
+    "--all-features",
+  ] },
+  { task = "lint:lints" },
+  { task = "lint:dylint" },
+]
+
+[tasks."lint:fmt"]
+hide = true
+run = "cargo fmt --all --check"
+
+[tasks."lint:clippy"]
+hide = true
+usage = '''
+flag "--all-features"
+flag "--timings"
+'''
+run = "cargo clippy --locked --workspace --all-targets{% if usage.all_features %} --all-features{% endif %}{% if usage.timings %} --timings{% endif %} -- -D warnings"
+
+[tasks."lint:lints"]
+hide = true
+extends = "dylint-link"
+dir = "lints"
+depends = ["lint:toolchain"]
+# The workspace override would mask the lint crates' nightly pin.
+env.RUSTUP_TOOLCHAIN = false
+run = [
+  "cargo fmt --all --check",
+  "cargo clippy --locked --lib --tests -- -D warnings",
+]
+
+[tasks."lint:dylint"]
+hide = true
+extends = "dylint-link"
+depends = ["lint:toolchain"]
+tools."cargo:cargo-dylint" = "6.3.2"
+usage = 'flag "--timings"'
+run = """cargo dylint --all --fail-on-no-libraries --{% if usage.timings %} --timings{% endif %} --workspace --all-targets --locked --config 'build.rustflags=["-Dwarnings","-Zalways-encode-mir"]'"""
+
+[tasks."lint:toolchain"]
+hide = true
+run = "mise -C lints install rust"
+
+[tasks.test]
+description = "Test the workspace and lint crates"
+run = [
+  { task = "test:workspace" },
+  { task = "test:workspace", args = [
+    "--all-features",
+  ] },
+  { task = "test:lints" },
+]
+
+[tasks."test:workspace"]
+hide = true
+run = "cargo test --workspace --locked"
+
+[tasks."test:lints"]
+hide = true
+extends = "dylint-link"
+dir = "lints"
+depends = ["lint:toolchain"]
+env.RUSTUP_TOOLCHAIN = false
+run = "cargo test --locked --lib"
