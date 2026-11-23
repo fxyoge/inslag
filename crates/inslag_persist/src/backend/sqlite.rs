@@ -219,8 +219,8 @@ impl Database {
         let next = previous
             .checked_add(1)
             .ok_or_else(|| Error::InvalidData("generation exhausted".into()))?;
-        let mut deletions = prepare_write(&transaction, &bundle, previous == 0)?;
-        deletions += write_batch(
+        prepare_write(&transaction, &bundle, previous == 0)?;
+        write_batch(
             &transaction,
             &bundle.added_entities,
             &bundle.removed_entities,
@@ -235,7 +235,6 @@ impl Database {
             generation: next as u64,
             entities: bundle.entity_count,
             upserts: bundle.batch.upserts.len(),
-            deletions,
             bytes: bundle
                 .batch
                 .upserts
@@ -274,15 +273,12 @@ fn prepare_write(
     transaction: &Transaction,
     bundle: &SaveBundle,
     first_commit: bool,
-) -> Result<usize, Error> {
+) -> Result<(), Error> {
     let rewrite = bundle.mode == WriteMode::ReplaceAll;
-    let mut deletions = if rewrite {
-        let deletions = clear_records(transaction)?;
+    if rewrite {
+        clear_records(transaction)?;
         ClearManifest.execute(transaction)?;
-        deletions
-    } else {
-        0
-    };
+    }
     if first_commit || rewrite {
         let mut insert = transaction.prepare_cached(InsertType::QUERY)?;
         for (key, role) in &bundle.manifest {
@@ -298,15 +294,15 @@ fn prepare_write(
         return Err(Error::Manifest);
     }
     if bundle.mode == WriteMode::ReplaceRecords {
-        deletions = clear_records(transaction)?;
+        clear_records(transaction)?;
     }
-    Ok(deletions)
+    Ok(())
 }
 
-fn clear_records(transaction: &Transaction) -> Result<usize, Error> {
-    let deletions = ClearRecords.execute(transaction)?;
+fn clear_records(transaction: &Transaction) -> Result<(), Error> {
+    ClearRecords.execute(transaction)?;
     ClearEntities.execute(transaction)?;
-    Ok(deletions)
+    Ok(())
 }
 
 fn write_batch(
@@ -314,20 +310,19 @@ fn write_batch(
     added_entities: &[i64],
     removed_entities: &[i64],
     batch: &Batch,
-) -> Result<usize, Error> {
+) -> Result<(), Error> {
     let mut insert = transaction.prepare_cached(InsertEntity::QUERY)?;
     for &id in added_entities {
         let command = InsertEntity::builder().id(id).build();
         insert.execute(command.as_params())?;
     }
-    let mut deletions = 0;
     let mut delete = transaction.prepare_cached(DeleteRecord::QUERY)?;
     for &(owner, key) in &batch.deletes {
         let command = DeleteRecord::builder()
             .entity(owner.entity_id().unwrap_or(0))
             .type_key(key)
             .build();
-        deletions += delete.execute(command.as_params())?;
+        delete.execute(command.as_params())?;
     }
     let mut upsert = transaction.prepare_cached(UpsertRecord::QUERY)?;
     let mut clear_refs = transaction.prepare_cached(ClearReferences::QUERY)?;
@@ -359,7 +354,7 @@ fn write_batch(
         let command = DeleteEntity::builder().id(id).build();
         delete_entity.execute(command.as_params())?;
     }
-    Ok(deletions)
+    Ok(())
 }
 
 fn read_save(transaction: &Transaction) -> Result<StoredSave, Error> {

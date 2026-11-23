@@ -113,7 +113,6 @@ impl Drop for Fixture {
             assert_eq!(stats.generation, 3);
             assert_eq!(stats.entities, self.entities);
             assert_eq!(stats.upserts, self.entities - self.deselected);
-            assert_eq!(stats.deletions, self.deselected);
         }
     }
 }

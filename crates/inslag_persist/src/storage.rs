@@ -77,7 +77,6 @@ pub struct SaveStats {
     pub entities: usize,
     /// Counts records, not entities; includes snapshot rewrites.
     pub upserts: usize,
-    pub deletions: usize,
     /// Payload only; excludes storage overhead.
     pub bytes: usize,
 }

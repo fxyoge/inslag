@@ -66,20 +66,14 @@ fn strategies_restore_identical_state_and_preserve_unrelated_data() {
             app.update();
         }
         let stats = app.save_request().unwrap();
-        assert_eq!(
-            (
-                stats.generation,
-                stats.entities,
-                stats.upserts,
-                stats.deletions
-            ),
-            (2, 2, 3, 2)
-        );
+        assert_eq!((stats.generation, stats.entities, stats.upserts), (2, 2, 3));
         let expected = positions(app.world_mut());
         app.world_mut().get_mut::<Position>(first).unwrap().value = 999;
         app.insert_resource(Clock(999));
         app.reload().unwrap();
         assert_eq!(positions(app.world_mut()), expected);
+        let mut labels = app.world_mut().query::<&Label>();
+        assert!(labels.iter(app.world()).next().is_none());
         assert_eq!(*app.world().resource::<Clock>(), Clock(8));
         assert!(app.world().get::<Unrelated>(unrelated).is_some());
         let mut fresh = self::app(directory.path(), strategy);
@@ -148,7 +142,7 @@ fn missing_resources_remove_the_persisted_value_and_restore_absence() {
     app.insert_resource(Clock(4));
     app.save_request().unwrap();
     app.world_mut().remove_resource::<Clock>();
-    assert_eq!(app.save_request().unwrap().deletions, 1);
+    app.save_request().unwrap();
     app.insert_resource(Clock(99));
     app.reload().unwrap();
     assert!(!app.world().contains_resource::<Clock>());
@@ -238,10 +232,7 @@ fn deselected_attachment_is_deleted_on_commit_but_not_on_rollback() {
         .unwrap();
     app.world_mut().entity_mut(reselected).insert(Selected);
     let retry = app.save_request().unwrap();
-    assert_eq!(
-        (retry.generation, retry.entities, retry.deletions),
-        (2, 2, 1)
-    );
+    assert_eq!((retry.generation, retry.entities), (2, 2));
     assert!(app.world().get::<Label>(entity).is_some());
 
     app.reload().unwrap();
@@ -280,7 +271,7 @@ fn removing_a_filtered_attachment_keeps_the_owner_saved() {
 
     app.world_mut().entity_mut(entity).remove::<Label>();
     let stats = app.save_request().unwrap();
-    assert_eq!((stats.entities, stats.upserts, stats.deletions), (1, 0, 1));
+    assert_eq!((stats.entities, stats.upserts), (1, 0));
     app.reload().unwrap();
     assert_eq!(positions(app.world_mut()), [position]);
     let mut labels = app.world_mut().query::<&Label>();
@@ -288,7 +279,7 @@ fn removing_a_filtered_attachment_keeps_the_owner_saved() {
 }
 
 #[test]
-fn losing_the_last_owner_does_not_count_as_an_attachment_deletion() {
+fn losing_the_last_owner_deletes_the_attachment() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = App::new();
     app.add_plugins(SavePlugin::sqlite(directory.path()))
@@ -310,8 +301,7 @@ fn losing_the_last_owner_does_not_count_as_an_attachment_deletion() {
     app.save_request().unwrap();
 
     app.world_mut().entity_mut(entity).remove::<Position>();
-    let stats = app.save_request().unwrap();
-    assert_eq!((stats.entities, stats.deletions), (0, 1));
+    assert_eq!(app.save_request().unwrap().entities, 0);
     let records: i64 = Connection::open(only_file(directory.path()))
         .unwrap()
         .query_row("SELECT count(*) FROM records", [], |row| row.get(0))
@@ -338,8 +328,12 @@ fn filtered_membership_changes_are_detected_without_marking_payloads() {
         let stats = app.save_request().unwrap();
         assert_eq!((stats.entities, stats.upserts), (1, 2));
         app.world_mut().entity_mut(entity).remove::<Selected>();
-        let stats = app.save_request().unwrap();
-        assert_eq!((stats.entities, stats.deletions), (0, 2));
+        assert_eq!(app.save_request().unwrap().entities, 0);
+        let records: i64 = Connection::open(only_file(directory.path()))
+            .unwrap()
+            .query_row("SELECT count(*) FROM records", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(records, 0);
         app.world_mut().entity_mut(entity).insert(Selected);
         app.save_request().unwrap();
         app.reload().unwrap();
@@ -494,10 +488,14 @@ fn untouched_references_prevent_incremental_target_deletion() {
         assert_eq!(positions(reader.world_mut()).len(), 2);
         writer.world_mut().entity_mut(a).remove::<Link>();
         let retry = writer.save_request().unwrap();
+        assert_eq!((retry.generation, retry.entities), (2, 1));
+        reader.reload().unwrap();
         assert_eq!(
-            (retry.generation, retry.entities, retry.deletions),
-            (2, 1, 2)
+            positions(reader.world_mut()),
+            [Position { name: 1, value: 1 }]
         );
+        let mut links = reader.world_mut().query::<&Link>();
+        assert!(links.iter(reader.world()).next().is_none());
     }
 }
 

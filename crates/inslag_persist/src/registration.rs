@@ -471,11 +471,8 @@ where
                     matches
                         .committed
                         .difference(&matches.captured)
-                        // Keep deletion counts consistent with unfiltered attachments:
-                        // losing ownership alone is handled by the entity cascade.
-                        .filter(|(entity, _)| {
-                            !ids.removed.contains(entity) || world.get::<T>(*entity).is_none()
-                        })
+                        // The entity deletion already removes its attachments.
+                        .filter(|(entity, _)| !ids.removed.contains(entity))
                         .map(|&(_, id)| (RecordOwner::entity(id), self.key)),
                 );
             } else {
