@@ -1,4 +1,4 @@
-#![feature(rustc_private)]
+#![feature(default_field_values, rustc_private)]
 
 extern crate rustc_ast;
 extern crate rustc_errors;
@@ -17,7 +17,7 @@ use rustc_lint::{EarlyContext, EarlyLintPass, LateContext, LateLintPass, LintCon
 use rustc_middle::ty;
 use rustc_span::{Span, sym};
 
-rustc_session::declare_lint! {
+rustc_lint::declare_lint! {
     /// Production Rust should interact with statecharts through events, effects,
     /// and activities, not private datamodel values or authored states. Tests
     /// may inspect internals; intentional integration adapters can allow the lint.
@@ -31,8 +31,8 @@ struct PrivateAccess {
 }
 
 struct TestScopes(Arc<Mutex<Vec<Span>>>);
-rustc_session::impl_lint_pass!(TestScopes => []);
-rustc_session::impl_lint_pass!(PrivateAccess => [INSLAG_STATE_TREE_PRIVATE_ACCESS]);
+rustc_lint::impl_lint_pass!(TestScopes => []);
+rustc_lint::impl_lint_pass!(PrivateAccess => [INSLAG_STATE_TREE_PRIVATE_ACCESS]);
 dylint_linting::dylint_library!();
 
 impl EarlyLintPass for TestScopes {

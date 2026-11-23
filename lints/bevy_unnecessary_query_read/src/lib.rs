@@ -1,4 +1,4 @@
-#![feature(rustc_private)]
+#![feature(default_field_values, rustc_private)]
 
 extern crate rustc_errors;
 extern crate rustc_hir;
@@ -20,7 +20,7 @@ use rustc_lint::{LateContext, LateLintPass, LintContext};
 use rustc_middle::ty::{self, Ty, TypeVisitableExt, TypeckResults};
 use rustc_span::Span;
 
-rustc_session::declare_lint! {
+rustc_lint::declare_lint! {
     /// Unknown query uses or filters cannot establish equivalent membership.
     pub BEVY_UNNECESSARY_QUERY_READ,
     Warn,
@@ -32,7 +32,7 @@ struct UnnecessaryQueryRead {
     reports: Vec<Report>,
     contracts: HashSet<LocalDefId>,
 }
-rustc_session::impl_lint_pass!(UnnecessaryQueryRead => [BEVY_UNNECESSARY_QUERY_READ]);
+rustc_lint::impl_lint_pass!(UnnecessaryQueryRead => [BEVY_UNNECESSARY_QUERY_READ]);
 dylint_linting::dylint_library!();
 
 #[unsafe(no_mangle)]
@@ -224,8 +224,8 @@ fn components_in<'tcx, A>(
     components: &mut Vec<(Ty<'tcx>, String)>,
 ) -> bool {
     match (&source.kind, ty.kind()) {
-        (TyKind::Ref(_, reference), ty::Ref(_, component, Mutability::Not)) => {
-            let Ok(name) = cx.sess().source_map().span_to_snippet(reference.ty.span) else {
+        (TyKind::Ref(_, reference, _), ty::Ref(_, component, Mutability::Not)) => {
+            let Ok(name) = cx.sess().source_map().span_to_snippet(reference.span) else {
                 return false;
             };
             if !components.iter().any(|(ty, _)| ty == component) {

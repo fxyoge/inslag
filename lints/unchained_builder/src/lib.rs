@@ -1,4 +1,4 @@
-#![feature(rustc_private)]
+#![feature(default_field_values, rustc_private)]
 
 extern crate rustc_errors;
 extern crate rustc_hir;
@@ -22,7 +22,7 @@ use rustc_span::Span;
 mod receiver;
 use receiver::ReceiverIdentity;
 
-rustc_session::declare_lint! {
+rustc_lint::declare_lint! {
     pub UNCHAINED_BUILDER,
     Warn,
     "builder calls should be chained"
@@ -32,7 +32,7 @@ rustc_session::declare_lint! {
 struct UnchainedBuilder<'tcx> {
     identity: ReceiverIdentity<'tcx>,
 }
-rustc_session::impl_lint_pass!(UnchainedBuilder<'_> => [UNCHAINED_BUILDER]);
+rustc_lint::impl_lint_pass!(UnchainedBuilder<'_> => [UNCHAINED_BUILDER]);
 dylint_linting::dylint_library!();
 
 #[unsafe(no_mangle)]
@@ -246,9 +246,11 @@ fn method<'tcx>(
             if !independent_return_lifetime(cx, id) {
                 return None;
             }
-            let env = cx.typing_env().with_post_analysis_normalized(cx.tcx);
-            let instance = ty::Instance::try_resolve(cx.tcx, env, id, generics).ok()??;
-            if !identity.returns_receiver(cx.tcx, env, instance) {
+            let ty::PseudoCanonicalInput { typing_env, value } = cx
+                .typing_env()
+                .with_post_analysis_normalized_invalidating_rigid_aliases(cx.tcx, generics);
+            let instance = ty::Instance::try_resolve(cx.tcx, typing_env, id, value).ok()??;
+            if !identity.returns_receiver(cx.tcx, typing_env, instance) {
                 return None;
             }
             Style::Mutable

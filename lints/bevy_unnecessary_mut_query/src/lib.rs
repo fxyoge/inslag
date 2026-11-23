@@ -1,4 +1,4 @@
-#![feature(rustc_private)]
+#![feature(default_field_values, rustc_private)]
 
 extern crate rustc_errors;
 extern crate rustc_hir;
@@ -21,7 +21,7 @@ use rustc_middle::ty::adjustment::{Adjust, DerefAdjustKind};
 use rustc_middle::ty::{self, Ty, TypeckResults};
 use rustc_span::{Span, hygiene::ExpnKind};
 
-rustc_session::declare_lint! {
+rustc_lint::declare_lint! {
     /// Unknown uses cannot establish that shared access is sufficient.
     pub BEVY_UNNECESSARY_MUT_QUERY,
     Warn,
@@ -33,7 +33,7 @@ struct UnnecessaryMutQuery {
     reports: Vec<Report>,
     contracts: HashSet<LocalDefId>,
 }
-rustc_session::impl_lint_pass!(UnnecessaryMutQuery => [BEVY_UNNECESSARY_MUT_QUERY]);
+rustc_lint::impl_lint_pass!(UnnecessaryMutQuery => [BEVY_UNNECESSARY_MUT_QUERY]);
 dylint_linting::dylint_library!();
 
 #[unsafe(no_mangle)]
@@ -217,9 +217,9 @@ struct Candidate {
 
 fn candidates<A>(data: &rustc_hir::Ty<'_, A>) -> Vec<Candidate> {
     match data.kind {
-        TyKind::Ref(_, reference) if reference.mutbl == Mutability::Mut => vec![Candidate {
+        TyKind::Ref(_, reference, Mutability::Mut) => vec![Candidate {
             span: data.span,
-            component: reference.ty.span,
+            component: reference.span,
             origin: Origin::Item,
         }],
         TyKind::Tup(fields) => fields
