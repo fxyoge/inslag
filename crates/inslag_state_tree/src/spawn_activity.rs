@@ -237,7 +237,7 @@ mod tests {
     #[cfg(feature = "persistence")]
     #[test]
     fn restoring_running_spawn_reconstructs_child_and_preserves_cancellation() {
-        use inslag_persist::WorldSaveExt;
+        use crate::persistence_test::Requests;
         let directory = tempfile::tempdir().unwrap();
         let mut app = sqlite_app(&directory);
         let parent = spawn_parent(&mut app, "loaded.scxml", Some(Duration::from_secs(1)));
@@ -255,8 +255,8 @@ mod tests {
             };
             (run.token, child)
         };
-        app.world_mut().save().unwrap();
-        app.world_mut().load().unwrap();
+        app.save_request().unwrap();
+        app.load_request().unwrap();
         update_state_trees(&mut app);
         update_state_trees(&mut app);
         update_state_trees(&mut app);
@@ -281,7 +281,7 @@ mod tests {
     #[cfg(feature = "persistence")]
     #[test]
     fn restoring_loading_spawn_does_not_duplicate_or_skip_child_creation() {
-        use inslag_persist::WorldSaveExt;
+        use crate::persistence_test::Requests;
         let directory = tempfile::tempdir().unwrap();
         let mut app = sqlite_app(&directory);
         let parent = spawn_parent(&mut app, "loaded.scxml", None);
@@ -289,8 +289,8 @@ mod tests {
             .entity_mut(parent)
             .insert(crate::PersistStateTree);
         app.update();
-        app.world_mut().save().unwrap();
-        app.world_mut().load().unwrap();
+        app.save_request().unwrap();
+        app.load_request().unwrap();
         assert_eq!(app.world().resource::<SpawnRuns>().runs.len(), 1);
         insert_for_run(&mut app, running_child_definition());
         update_state_trees(&mut app);
@@ -302,7 +302,7 @@ mod tests {
     #[cfg(feature = "persistence")]
     #[test]
     fn restored_loading_run_detects_failure_even_without_the_old_failure_message() {
-        use inslag_persist::WorldSaveExt;
+        use crate::persistence_test::Requests;
         let directory = tempfile::tempdir().unwrap();
         let mut app = sqlite_app(&directory);
         let path = "missing-child-after-load.scxml";
@@ -352,8 +352,8 @@ mod tests {
             .resource_mut::<bevy_ecs::message::Messages<AssetLoadFailedEvent<StateTreeDefinition>>>(
             )
             .clear();
-        app.world_mut().save().unwrap();
-        app.world_mut().load().unwrap();
+        app.save_request().unwrap();
+        app.load_request().unwrap();
         update_state_trees(&mut app);
         update_state_trees(&mut app);
         for _ in 0..1_000 {

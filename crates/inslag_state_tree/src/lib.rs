@@ -136,6 +136,10 @@ pub mod persistence;
 #[cfg(test)]
 mod test_harness;
 
+#[cfg(all(test, feature = "persistence"))]
+#[path = "../../inslag_persist/tests/support/requests.rs"]
+mod persistence_test;
+
 pub mod scxml;
 
 pub use app::StateTreeExt;

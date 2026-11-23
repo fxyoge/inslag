@@ -1,9 +1,12 @@
-use bevy_app::{App, TaskPoolPlugin, Update};
+use bevy_app::{App, Last, TaskPoolPlugin, Update};
 use bevy_asset::{AssetPlugin, Assets};
 use bevy_ecs::prelude::*;
 use bevy_time::TimePlugin;
-use inslag_persist::{SavePlugin, WorldSaveExt};
+use inslag_persist::{SavePlugin, SaveRequest, SaveStatus};
+#[path = "../../inslag_persist/tests/support/requests.rs"]
+mod requests;
 use inslag_state_tree::{persistence::AppPersistenceExt, prelude::*};
+use requests::Requests;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
@@ -20,19 +23,22 @@ fn main() {
         app.add_plugins(
             SavePlugin::sqlite(directory.path().join("profile.sqlite")).load_on_start(false),
         );
-        app.world_mut().save().unwrap();
+        app.save_request().unwrap();
         let mut idle = Vec::new();
         let mut saves = Vec::new();
         let mut payload_bytes = 0;
         // Setup and the initial commit are excluded; save frames are reported
         // separately so a rare stall cannot hide in the overall median.
         for frame in 0..1200 {
+            let save = frame % 60 == 0;
+            if save {
+                app.world_mut().write_message(SaveRequest::Save);
+            }
             let start = Instant::now();
             app.update();
-            if frame % 60 == 0 {
-                let stats = app.world_mut().save().unwrap();
+            if save {
                 saves.push(start.elapsed());
-                payload_bytes = stats.bytes;
+                payload_bytes = finish_save(&mut app);
             } else {
                 idle.push(start.elapsed());
             }
@@ -76,6 +82,19 @@ fn app(sheets: usize) -> App {
     }
     app.update();
     app
+}
+
+fn finish_save(app: &mut App) -> usize {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let status = app.world().resource::<SaveStatus>();
+        if !status.is_saving() {
+            return status.last_save().unwrap().as_ref().unwrap().bytes;
+        }
+        assert!(Instant::now() < deadline, "persistence did not settle");
+        std::thread::yield_now();
+        app.world_mut().run_schedule(Last);
+    }
 }
 
 fn report(sheets: usize, phase: &str, samples: &mut [Duration]) {

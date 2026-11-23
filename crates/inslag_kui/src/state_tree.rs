@@ -799,7 +799,8 @@ mod tests {
     #[cfg(feature = "persistence")]
     #[test]
     fn restore_reconstructs_views_from_datamodel_and_discards_pending_actions() {
-        use inslag_persist::{SavePlugin, WorldSaveExt};
+        use bevy::app::Last;
+        use inslag_persist::{SavePlugin, SaveRequest, SaveStatus};
         let directory = tempfile::tempdir().unwrap();
         let source = format!(r#"{HEADER}<node><text bind:text="received"/></node></view>"#);
         let mut app = test_support::app(&[("saved.kui", &source)]);
@@ -821,8 +822,28 @@ mod tests {
         send(&mut app, owner, "saved-action");
         app.update();
         send(&mut app, owner, "discarded-action");
-        app.world_mut().save().unwrap();
-        app.world_mut().load().unwrap();
+        for request in [SaveRequest::Save, SaveRequest::Load] {
+            let is_save = matches!(request, SaveRequest::Save);
+            app.world_mut().write_message(request);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                app.world_mut().run_schedule(Last);
+                let status = app.world().resource::<SaveStatus>();
+                if !status.is_saving() && !status.is_loading() {
+                    if is_save {
+                        status.last_save().unwrap().as_ref().unwrap();
+                    } else {
+                        status.load().unwrap().as_ref().unwrap();
+                    }
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "persistence did not settle"
+                );
+                std::thread::yield_now();
+            }
+        }
         let owner = app
             .world_mut()
             .query::<(Entity, &StateTreeInstance)>()

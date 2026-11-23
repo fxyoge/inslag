@@ -3,7 +3,10 @@
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use divan::{Bencher, black_box};
-use inslag_persist::{AppSaveExt, SavePlugin, WorldSaveExt, component};
+use inslag_persist::{AppSaveExt, SavePlugin, component};
+#[path = "../tests/support/requests.rs"]
+mod requests;
+use requests::Requests;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
@@ -34,7 +37,7 @@ fn commit<const N: usize>(bencher: Bencher, percent: usize) {
         .with_inputs(|| setup(N, percent))
         .bench_local_refs(|case| {
             case.app.update();
-            black_box(case.app.world_mut().save().unwrap())
+            black_box(case.app.save_request().unwrap())
         });
 }
 
@@ -107,7 +110,7 @@ fn restore<const N: usize>(bencher: Bencher) {
     bencher
         .with_inputs(|| setup(N, 0))
         .bench_local_refs(|case| {
-            case.app.world_mut().load().unwrap();
+            case.app.load_request().unwrap();
             black_box(case.app.world().entities().len());
         });
 }
@@ -115,7 +118,7 @@ fn restore<const N: usize>(bencher: Bencher) {
 fn setup(entities: usize, percent: usize) -> Case {
     let directory = tempfile::tempdir().unwrap();
     let mut app = App::new();
-    app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")))
+    app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")).load_on_start(false))
         .persist(component::<Machine>("machine"))
         .insert_resource(Edits(entities * percent / 100))
         .add_systems(Update, simulate);
@@ -126,7 +129,7 @@ fn setup(entities: usize, percent: usize) -> Case {
             inventory: [index as u64; 8],
         }));
     app.update();
-    let initial = app.world_mut().save().unwrap();
+    let initial = app.save_request().unwrap();
     assert_eq!(initial.upserts, entities);
     Case {
         app,

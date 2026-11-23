@@ -2,7 +2,10 @@ mod support;
 
 use bevy_ecs::{prelude::*, system::RunSystemOnce};
 use divan::{Bencher, counter::ItemsCount};
-use inslag_persist::{SavePlugin, WorldSaveExt};
+use inslag_persist::SavePlugin;
+#[path = "../../inslag_persist/tests/support/requests.rs"]
+mod requests;
+use requests::Requests;
 use support::{BenchmarkApp, Executor};
 
 fn main() {
@@ -13,9 +16,9 @@ fn main() {
 fn save_datamodel(bencher: Bencher<'_, '_>, instances: usize) {
     let directory = tempfile::tempdir().unwrap();
     let mut benchmark = benchmark(instances, &directory);
-    benchmark.app.world_mut().save().unwrap();
+    benchmark.app.save_request().unwrap();
     bencher.counter(ItemsCount::new(instances)).bench_local(|| {
-        divan::black_box(benchmark.app.world_mut().save().unwrap());
+        divan::black_box(benchmark.app.save_request().unwrap());
     });
 }
 
@@ -26,11 +29,11 @@ fn restore_datamodel(bencher: Bencher<'_, '_>, instances: usize) {
         .with_inputs(|| {
             let directory = tempfile::tempdir().unwrap();
             let mut benchmark = benchmark(instances, &directory);
-            benchmark.app.world_mut().save().unwrap();
+            benchmark.app.save_request().unwrap();
             (benchmark, directory)
         })
         .bench_local_values(|(mut benchmark, directory)| {
-            benchmark.app.world_mut().load().unwrap();
+            benchmark.app.load_request().unwrap();
             benchmark.run_schedule();
             divan::black_box((benchmark, directory))
         });

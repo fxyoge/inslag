@@ -101,7 +101,7 @@ impl<A: SaveAdapter> Codec for AdapterCodec<A> {
     fn decode(
         &self,
         world: &mut World,
-        mut records: Vec<(i64, Vec<u8>)>,
+        records: &[(i64, Vec<u8>)],
     ) -> Result<Box<dyn Decoded>, Error> {
         if records.len() != 1 || records[0].0 != 0 {
             return Err(Error::InvalidData(format!(
@@ -110,10 +110,9 @@ impl<A: SaveAdapter> Codec for AdapterCodec<A> {
             )));
         }
         Ok(Box::new(AdapterDecoded(
-            self.adapter.prepare(world, &records.remove(0).1)?,
+            self.adapter.prepare(world, &records[0].1)?,
         )))
     }
-    fn acknowledge(&mut self, _world: &mut World, _tick: bevy_ecs::change_detection::Tick) {}
     fn reset(&mut self, world: &mut World) {
         self.members.clear();
         self.reconcile(world);

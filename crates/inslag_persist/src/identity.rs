@@ -20,6 +20,11 @@ pub(crate) struct Identities {
     pub suspended: bool,
 }
 
+pub(crate) struct IdentityChanges {
+    added: HashSet<Entity>,
+    removed: HashSet<Entity>,
+}
+
 impl Default for Identities {
     fn default() -> Self {
         Self {
@@ -64,11 +69,28 @@ impl Identities {
         }
     }
 
-    pub(crate) fn acknowledge(&mut self) {
-        let entries = Arc::make_mut(&mut self.entries);
-        for entity in self.removed.drain() {
-            entries.remove(&entity);
+    pub(crate) fn begin_commit(&mut self) -> IdentityChanges {
+        IdentityChanges {
+            added: std::mem::take(&mut self.added),
+            removed: std::mem::take(&mut self.removed),
         }
-        self.added.clear();
+    }
+
+    pub(crate) fn finish_commit(&mut self, changes: IdentityChanges, committed: bool) {
+        for entity in changes.added {
+            if !committed && self.entries[&entity].memberships > 0 {
+                self.added.insert(entity);
+            }
+        }
+        for entity in changes.removed {
+            if self.entries[&entity].memberships == 0 {
+                if committed {
+                    self.removed.remove(&entity);
+                    Arc::make_mut(&mut self.entries).remove(&entity);
+                } else {
+                    self.removed.insert(entity);
+                }
+            }
+        }
     }
 }

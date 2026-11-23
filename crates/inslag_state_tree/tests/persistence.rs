@@ -3,8 +3,11 @@ use bevy_app::{App, TaskPoolPlugin, Update};
 use bevy_asset::{AssetPlugin, Assets, Handle};
 use bevy_ecs::{prelude::*, system::RunSystemOnce};
 use bevy_time::{Time, TimePlugin};
-use inslag_persist::{SavePlugin, WorldSaveExt};
+use inslag_persist::SavePlugin;
+#[path = "../../inslag_persist/tests/support/requests.rs"]
+mod requests;
 use inslag_state_tree::prelude::*;
+use requests::Requests;
 use std::time::Duration;
 
 fn lifecycle(
@@ -44,7 +47,7 @@ struct Starts(usize);
 struct ConsumersEnabled(bool);
 fn sqlite_app(directory: &tempfile::TempDir) -> App {
     let mut app = app();
-    app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")));
+    app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")).load_on_start(false));
     app
 }
 fn app() -> App {
@@ -144,13 +147,13 @@ fn load_only_restores_datamodel_then_enters_current_initial_configuration() {
     let (owner, _) = spawn(&mut source, definition(false));
     advance(&mut source, owner);
     assert_eq!(data(&source, owner, "counter"), Some(LuauValue::Integer(3)));
-    source.world_mut().save().unwrap();
+    source.save_request().unwrap();
     let mut target = sqlite_app(&directory);
     target
         .world_mut()
         .resource_mut::<Assets<StateTreeDefinition>>()
         .add(definition(true));
-    target.world_mut().load().unwrap();
+    target.load_request().unwrap();
     let entity = target
         .world_mut()
         .query_filtered::<Entity, With<StateTreeInstance>>()
@@ -205,8 +208,8 @@ fn restored_dynamic_timers_evaluate_current_entry_data_and_configuration() {
         .resource_mut::<Time>()
         .advance_by(Duration::from_secs(1));
     app.world_mut().run_schedule(Update);
-    app.world_mut().save().unwrap();
-    app.world_mut().load().unwrap();
+    app.save_request().unwrap();
+    app.load_request().unwrap();
     let entity = app
         .world_mut()
         .query_filtered::<Entity, With<StateTreeInstance>>()
@@ -332,13 +335,13 @@ fn sqlite_restore_restarts_completed_execution_and_replays_current_entry_actions
             .status(),
         &InstanceStatus::Complete
     );
-    first.world_mut().save().unwrap();
+    first.save_request().unwrap();
     let mut second = sqlite_app(&directory);
     second
         .world_mut()
         .resource_mut::<Assets<StateTreeDefinition>>()
         .add(definition(true));
-    second.world_mut().load().unwrap();
+    second.load_request().unwrap();
     let entity = second
         .world_mut()
         .query_filtered::<Entity, With<StateTreeInstance>>()
@@ -374,8 +377,8 @@ fn boot_routing_is_ordinary_scxml_using_persistent_data() {
       <state id="working"/>"#);
     let (entity, _) = spawn(&mut app, definition);
     advance(&mut app, entity);
-    app.world_mut().save().unwrap();
-    app.world_mut().load().unwrap();
+    app.save_request().unwrap();
+    app.load_request().unwrap();
     app.world_mut().run_schedule(Update);
     let entity = app
         .world_mut()
@@ -478,8 +481,8 @@ fn restore_discards_unconsumed_activity_starts_from_the_outgoing_execution() {
     app.world_mut().resource_mut::<ConsumersEnabled>().0 = false;
     spawn(&mut app, definition(false));
     assert_eq!(app.world().resource::<Starts>().0, 0);
-    app.world_mut().save().unwrap();
-    app.world_mut().load().unwrap();
+    app.save_request().unwrap();
+    app.load_request().unwrap();
     let entity = app
         .world_mut()
         .query_filtered::<Entity, With<StateTreeInstance>>()
@@ -532,13 +535,13 @@ fn persistence_is_opt_in_and_restored_instances_keep_their_selection() {
         .id();
     source.world_mut().run_schedule(Update);
     advance(&mut source, runtime);
-    source.world_mut().save().unwrap();
+    source.save_request().unwrap();
     let mut target = sqlite_app(&directory);
     target
         .world_mut()
         .resource_mut::<Assets<StateTreeDefinition>>()
         .add(definition(false));
-    target.world_mut().load().unwrap();
+    target.load_request().unwrap();
     let restored = target
         .world_mut()
         .query_filtered::<Entity, With<StateTreeInstance>>()
@@ -562,8 +565,8 @@ fn persistence_is_opt_in_and_restored_instances_keep_their_selection() {
         data(&target, restored, "counter"),
         Some(LuauValue::Integer(2))
     );
-    target.world_mut().save().unwrap();
-    target.world_mut().load().unwrap();
+    target.save_request().unwrap();
+    target.load_request().unwrap();
     assert!(
         target
             .world_mut()
@@ -571,7 +574,7 @@ fn persistence_is_opt_in_and_restored_instances_keep_their_selection() {
             .single(target.world())
             .is_ok()
     );
-    source.world_mut().load().unwrap();
+    source.load_request().unwrap();
     assert_eq!(
         data(&source, runtime, "counter"),
         Some(LuauValue::Integer(3))
@@ -601,7 +604,7 @@ fn unmarked_instances_preserve_pending_events_outcomes_and_timer_deadlines() {
         .resource_mut::<Time>()
         .advance_by(Duration::from_secs(7));
     app.world_mut().run_schedule(Update);
-    app.world_mut().save().unwrap();
+    app.save_request().unwrap();
     app.world_mut()
         .run_system_once(
             move |mut writer: EntityStateTreeEventWriter,
@@ -611,7 +614,7 @@ fn unmarked_instances_preserve_pending_events_outcomes_and_timer_deadlines() {
             },
         )
         .unwrap();
-    app.world_mut().load().unwrap();
+    app.load_request().unwrap();
     app.world_mut().run_schedule(Update);
     assert_eq!(data(&app, owner, "counter"), Some(LuauValue::Integer(1)));
     assert_eq!(
@@ -645,8 +648,8 @@ fn unmarked_activity_starts_survive_restoring_a_different_saved_selection() {
         .add(definition);
     let owner = app.world_mut().spawn(StateTreeInstance::new(handle)).id();
     app.world_mut().run_schedule(Update);
-    app.world_mut().save().unwrap();
-    app.world_mut().load().unwrap();
+    app.save_request().unwrap();
+    app.load_request().unwrap();
     app.world_mut().resource_mut::<ConsumersEnabled>().0 = true;
     app.world_mut().run_schedule(Update);
     assert_eq!(app.world().resource::<Starts>().0, 1);
@@ -670,8 +673,8 @@ fn unmarked_controllers_do_not_replay_already_consumed_activity_starts() {
     app.world_mut().run_schedule(Update);
     assert_eq!(app.world().resource::<Starts>().0, 1);
     let token = app.world().resource::<Runs>().0[0].0;
-    app.world_mut().save().unwrap();
-    app.world_mut().load().unwrap();
+    app.save_request().unwrap();
+    app.load_request().unwrap();
     app.world_mut().run_schedule(Update);
     assert_eq!(app.world().resource::<Starts>().0, 1);
     assert_eq!(app.world().resource::<Runs>().0.len(), 1);

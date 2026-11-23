@@ -1,7 +1,7 @@
 use crate::{
     Error, LoadOutcome, SaveStats,
     registration::Registry,
-    storage::{self, Storage},
+    storage::{self, Pending, Saving, Storage, StoredSave},
 };
 use bevy_ecs::{
     message::MessageCursor,
@@ -50,9 +50,10 @@ pub enum SaveRequest {
 #[derive(Resource, Default)]
 pub struct SaveStatus {
     path: Option<PathBuf>,
-    load: Option<Result<LoadOutcome, String>>,
-    last_save: Option<Result<SaveStats, String>>,
+    load: Option<Result<LoadOutcome, Error>>,
+    last_save: Option<Result<SaveStats, Error>>,
     loading: bool,
+    saving: bool,
     writable: bool,
 }
 impl SaveStatus {
@@ -65,14 +66,17 @@ impl SaveStatus {
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
-    pub fn load(&self) -> Option<&Result<LoadOutcome, String>> {
+    pub fn load(&self) -> Option<&Result<LoadOutcome, Error>> {
         self.load.as_ref()
     }
-    pub fn last_save(&self) -> Option<&Result<SaveStats, String>> {
+    pub fn last_save(&self) -> Option<&Result<SaveStats, Error>> {
         self.last_save.as_ref()
     }
     pub fn is_loading(&self) -> bool {
         self.loading
+    }
+    pub fn is_saving(&self) -> bool {
+        self.saving
     }
     pub fn can_save(&self) -> bool {
         self.writable
@@ -82,12 +86,29 @@ impl SaveStatus {
 struct Opening {
     path: PathBuf,
     storage: Storage,
+    read: Read,
 }
+
+enum Read {
+    Waiting,
+    Pending(Pending<Option<StoredSave>>),
+    Ready(Option<StoredSave>),
+}
+
+#[derive(Default)]
+enum AfterSave {
+    #[default]
+    None,
+    Open(PathBuf),
+    Close,
+}
+
 #[derive(Resource)]
 pub(crate) struct SaveSession {
     opening: Option<Opening>,
+    saving: Option<(Saving, AfterSave)>,
     prepared: Option<SaveRequest>,
-    running: bool,
+    queued: Option<SaveRequest>,
     deadline: Duration,
     interval: Option<Duration>,
     enabled: bool,
@@ -97,8 +118,9 @@ impl Default for SaveSession {
     fn default() -> Self {
         Self {
             opening: None,
+            saving: None,
             prepared: None,
-            running: false,
+            queued: None,
             deadline: Duration::MAX,
             interval: None,
             enabled: true,
@@ -108,7 +130,10 @@ impl Default for SaveSession {
 
 impl SaveSession {
     fn is_busy(&self) -> bool {
-        self.running || self.opening.is_some() || self.prepared.is_some()
+        self.opening.is_some()
+            || self.saving.is_some()
+            || self.prepared.is_some()
+            || self.queued.is_some()
     }
 }
 
@@ -116,21 +141,8 @@ pub(crate) fn initial_load(world: &mut World) {
     if !world.resource::<Registry>().started
         && let Some(path) = world.resource::<SaveStatus>().path.clone()
     {
-        run_active(world, |world| open(world, path));
+        open(world, path);
     }
-}
-
-pub(crate) fn run_idle<T>(
-    world: &mut World,
-    operation: impl FnOnce(&mut World) -> Result<T, Error>,
-) -> Result<T, Error> {
-    let session = world
-        .get_resource::<SaveSession>()
-        .ok_or(Error::MissingPlugin)?;
-    if session.is_busy() {
-        return Err(Error::Busy);
-    }
-    run_active(world, operation)
 }
 
 pub(crate) fn set_enabled(In(enabled): In<bool>, mut session: ResMut<SaveSession>) {
@@ -168,27 +180,57 @@ pub(crate) fn has_work(
 pub(crate) fn process(world: &mut World, mut cursor: Local<MessageCursor<SaveRequest>>) {
     let messages = world.resource::<Messages<SaveRequest>>();
     let mut requests = cursor.read(messages);
-    let request = if world.resource::<SaveSession>().is_busy() {
+    let session = world.resource::<SaveSession>();
+    let accepts_save = matches!(session.saving, Some((_, AfterSave::None)))
+        || matches!(session.queued, Some(SaveRequest::Save));
+    let accepts_follow_up = accepts_save || matches!(session.prepared, Some(SaveRequest::Save));
+    // A transition must not get swallowed by an autosave or a redundant save request.
+    let queued = if accepts_follow_up && matches!(session.queued, None | Some(SaveRequest::Save)) {
+        let first = requests.next();
+        first
+            .filter(|request| !matches!(request, SaveRequest::Save))
+            .or_else(|| requests.find(|request| !matches!(request, SaveRequest::Save)))
+            .or(first.filter(|_| accepts_save))
+            .cloned()
+    } else {
+        None
+    };
+    let request = if session.is_busy() {
         None
     } else {
         requests.next().cloned()
     };
-    let rejected_save = requests.any(|request| matches!(request, SaveRequest::Save));
+    let rejected_save = !accepts_follow_up
+        && session.saving.is_none()
+        && requests.any(|request| matches!(request, SaveRequest::Save));
     cursor.clear(messages);
-    if rejected_save {
-        record_save(world, &Err(Error::Busy));
+    if let Some(queued) = queued {
+        world.resource_mut::<SaveSession>().queued = Some(queued);
     }
-    run_active(world, |world| process_active(world, request));
+    if rejected_save {
+        record_save(world, Err(Error::Busy));
+    }
+    process_active(world, request);
 }
 
 fn process_active(world: &mut World, request: Option<SaveRequest>) {
+    if world.resource::<SaveSession>().saving.is_some() {
+        finish_write(world);
+        return;
+    }
     if world.resource::<SaveSession>().opening.is_some() {
         finish_open(world);
         return;
     }
     let prepared = world.resource_mut::<SaveSession>().prepared.take();
     let already_prepared = prepared.is_some();
-    if let Some(request) = prepared.or(request) {
+    if already_prepared {
+        world.resource_mut::<SaveStatus>().saving = false;
+    }
+    let request = prepared
+        .or_else(|| world.resource_mut::<SaveSession>().queued.take())
+        .or(request);
+    if let Some(request) = request {
         // A preparation schedule is optional. Ordinary games save immediately;
         // gameplay settlement commands get a normal cleanup frame when installed.
         let has_preparation = world
@@ -203,28 +245,30 @@ fn process_active(world: &mut World, request: Option<SaveRequest>) {
             world.run_schedule(PrepareSave);
             world.flush();
             world.resource_mut::<SaveSession>().prepared = Some(request);
+            let mut status = world.resource_mut::<SaveStatus>();
+            status.saving = true;
+            status.last_save = None;
             return;
         }
         match request {
-            SaveRequest::Save => {
-                let _ = save(world);
-            }
+            SaveRequest::Save => start_write(world, AfterSave::None),
             SaveRequest::Load => {
                 if let Some(path) = world.resource::<SaveStatus>().path.clone() {
                     open(world, path);
+                } else {
+                    world.resource_mut::<SaveStatus>().load = Some(Err(Error::Closed));
                 }
             }
             SaveRequest::Open(path) => {
-                if !outgoing(world) || save(world).is_ok() {
+                if outgoing(world) {
+                    start_write(world, AfterSave::Open(path));
+                } else {
                     open(world, path);
                 }
             }
             SaveRequest::Close => {
-                if outgoing(world) && save(world).is_ok() {
-                    storage::clear_scope(world);
-                    world.resource_mut::<Storage>().close();
-                    *world.resource_mut::<SaveStatus>() = SaveStatus::default();
-                    world.run_schedule(SaveClosed);
+                if outgoing(world) {
+                    start_write(world, AfterSave::Close);
                 }
             }
         }
@@ -234,37 +278,43 @@ fn process_active(world: &mut World, request: Option<SaveRequest>) {
         .get_resource::<Time<Real>>()
         .map_or(Duration::ZERO, |time| time.elapsed());
     if world.resource::<SaveStatus>().writable && now >= world.resource::<SaveSession>().deadline {
-        let _ = save(world);
+        start_write(world, AfterSave::None);
         reset_deadline(world);
     }
 }
-fn save(world: &mut World) -> Result<(), Error> {
-    let result = if ready(world) {
-        storage::save(world)
-    } else {
-        Err(Error::NotReady)
+fn finish_write(world: &mut World) {
+    let mut session = world.resource_mut::<SaveSession>();
+    let (saving, _) = session.saving.as_mut().expect("pending write");
+    let Some(result) = saving.pending.poll() else {
+        return;
     };
-    record_save(world, &result);
-    result.map(|_| ())
-}
-pub(crate) fn record_save(world: &mut World, result: &Result<SaveStats, Error>) {
-    let mut status = world.resource_mut::<SaveStatus>();
-    status.last_save = Some(result.as_ref().copied().map_err(ToString::to_string));
-    if result.is_ok() {
-        status.writable = true;
-        reset_deadline(world);
+    let (saving, after) = session.saving.take().expect("pending write");
+    if result.is_err() {
+        session.queued = None;
+    }
+    saving.finish(world, &result);
+    world.resource_mut::<SaveStatus>().saving = false;
+    let committed = result.is_ok();
+    record_save(world, result);
+    if committed {
+        match after {
+            AfterSave::None => {}
+            AfterSave::Open(path) => open(world, path),
+            AfterSave::Close => {
+                storage::clear_scope(world);
+                world.resource_mut::<Storage>().close();
+                *world.resource_mut::<SaveStatus>() = SaveStatus::default();
+                world.run_schedule(SaveClosed);
+            }
+        }
     }
 }
-fn run_active<T>(world: &mut World, operation: impl FnOnce(&mut World) -> T) -> T {
-    world.resource_mut::<SaveSession>().running = true;
-    let result = operation(world);
-    world.resource_mut::<SaveSession>().running = false;
-    result
-}
+
 fn open(world: &mut World, path: PathBuf) {
     world.resource_mut::<SaveSession>().opening = Some(Opening {
         storage: Storage::sqlite(path.clone()),
         path,
+        read: Read::Waiting,
     });
     let mut status = world.resource_mut::<SaveStatus>();
     status.loading = true;
@@ -275,16 +325,44 @@ fn finish_open(world: &mut World) {
     if !ready(world) {
         return;
     }
-    let Some(opening) = world.resource_mut::<SaveSession>().opening.take() else {
+    let Some(mut opening) = world.resource_mut::<SaveSession>().opening.take() else {
         return;
     };
-    let outgoing = world
-        .remove_resource::<Storage>()
-        .expect("installed save storage");
-    world.insert_resource(opening.storage);
-    let result = storage::load(world);
+    let read_error = match &mut opening.read {
+        Read::Waiting => {
+            world.resource_mut::<Registry>().started = true;
+            match opening.storage.read() {
+                Ok(pending) => {
+                    opening.read = Read::Pending(pending);
+                    world.resource_mut::<SaveSession>().opening = Some(opening);
+                    return;
+                }
+                Err(error) => Some(error),
+            }
+        }
+        Read::Pending(pending) => match pending.poll() {
+            None => {
+                world.resource_mut::<SaveSession>().opening = Some(opening);
+                return;
+            }
+            Some(Ok(saved)) => {
+                opening.read = Read::Ready(saved);
+                None
+            }
+            Some(Err(error)) => Some(error),
+        },
+        Read::Ready(_) => None,
+    };
+    let result = if let Some(error) = read_error {
+        Err(error)
+    } else if let Read::Ready(saved) = &opening.read {
+        storage::restore(world, saved.as_ref())
+    } else {
+        unreachable!("read has either completed or failed")
+    };
     match result {
         Ok(outcome) => {
+            world.insert_resource(opening.storage);
             if outcome == LoadOutcome::Missing {
                 storage::clear_scope(world);
             }
@@ -298,20 +376,36 @@ fn finish_open(world: &mut World) {
             reset_deadline(world);
         }
         Err(Error::AssetNotReady(_)) => {
-            let storage = world.remove_resource::<Storage>().unwrap();
-            world.insert_resource(outgoing);
-            world.resource_mut::<SaveSession>().opening = Some(Opening {
-                path: opening.path,
-                storage,
-            });
+            world.resource_mut::<SaveSession>().opening = Some(opening);
         }
         Err(error) => {
-            world.insert_resource(outgoing);
+            if world.resource::<SaveStatus>().path() == Some(&opening.path) {
+                world.resource_mut::<Storage>().block_writes();
+            }
             let writable = storage::can_save(world);
             let mut status = world.resource_mut::<SaveStatus>();
             status.loading = false;
-            status.load = Some(Err(error.to_string()));
+            status.load = Some(Err(error));
             status.writable = writable;
+        }
+    }
+}
+fn start_write(world: &mut World, after: AfterSave) {
+    let result = if ready(world) {
+        storage::begin_save(world)
+    } else {
+        Err(Error::NotReady)
+    };
+    match result {
+        Ok(saving) => {
+            world.resource_mut::<SaveSession>().saving = Some((saving, after));
+            let mut status = world.resource_mut::<SaveStatus>();
+            status.saving = true;
+            status.last_save = None;
+        }
+        Err(error) => {
+            world.resource_mut::<SaveSession>().queued = None;
+            record_save(world, Err(error));
         }
     }
 }
@@ -325,13 +419,12 @@ fn ready(world: &mut World) -> bool {
     world.run_schedule(CheckReadiness);
     world.resource::<SaveSession>().enabled
 }
-pub(crate) fn record_load(world: &mut World, result: &Result<LoadOutcome, Error>) {
-    let writable = storage::can_save(world);
+fn record_save(world: &mut World, result: Result<SaveStats, Error>) {
     let mut status = world.resource_mut::<SaveStatus>();
-    status.load = Some(result.as_ref().copied().map_err(ToString::to_string));
-    status.writable = writable;
-    if result.is_ok() {
-        world.run_schedule(SaveOpened);
+    let committed = result.is_ok();
+    status.last_save = Some(result);
+    if committed {
+        status.writable = true;
         reset_deadline(world);
     }
 }

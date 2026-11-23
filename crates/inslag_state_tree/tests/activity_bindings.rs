@@ -4,6 +4,10 @@ use bevy_ecs::{message::MessageCursor, prelude::*, system::RunSystemOnce};
 use bevy_time::TimePlugin;
 use inslag_state_tree::prelude::*;
 
+#[cfg(feature = "persistence")]
+#[path = "../../inslag_persist/tests/support/requests.rs"]
+mod requests;
+
 #[derive(Clone, StateTreeInput)]
 struct Work {
     amount: u32,
@@ -501,7 +505,8 @@ fn terminal_outcomes_release_bindings_without_requiring_a_state_exit() {
 #[cfg(feature = "persistence")]
 #[test]
 fn restore_reconstructs_bindings_without_a_lifecycle_queue() {
-    use inslag_persist::{SavePlugin, WorldSaveExt};
+    use inslag_persist::SavePlugin;
+    use requests::Requests;
     let directory = tempfile::tempdir().unwrap();
     let mut app = app();
     app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")).load_on_start(false));
@@ -527,8 +532,8 @@ fn restore_reconstructs_bindings_without_a_lifecycle_queue() {
         .get_mut(previous)
         .unwrap()
         .amount = 99;
-    app.world_mut().save().unwrap();
-    app.world_mut().load().unwrap();
+    app.save_request().unwrap();
+    app.load_request().unwrap();
     app.update();
     let (owner, runs) = app
         .world_mut()

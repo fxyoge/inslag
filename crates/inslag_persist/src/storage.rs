@@ -1,24 +1,26 @@
 use crate::{
     LoadOutcome, entity,
-    identity::{Identities, Identity},
+    identity::{Identities, Identity, IdentityChanges},
     registration::{Batch, Registry},
 };
 use bevy_ecs::{
+    change_detection::Tick,
     entity::{Entity, EntityHashMap},
     prelude::*,
 };
 use std::{
     collections::{BTreeMap, HashMap},
     path::PathBuf,
-    sync::Arc,
+    sync::{
+        Arc, Mutex,
+        mpsc::{Receiver, RecvError, TryRecvError},
+    },
 };
 
 mod sqlite;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("install SavePlugin before saving or loading")]
-    MissingPlugin,
     #[error("another persistence operation is in progress")]
     Busy,
     #[error("session is not ready to save")]
@@ -87,7 +89,7 @@ struct SaveBundle {
     batch: Batch,
 }
 
-struct StoredSave {
+pub(crate) struct StoredSave {
     generation: u64,
     entities: Vec<i64>,
     records: BTreeMap<String, Vec<(i64, Vec<u8>)>>,
@@ -95,8 +97,32 @@ struct StoredSave {
 }
 
 trait Backend: Send + Sync {
-    fn commit(&mut self, bundle: SaveBundle) -> Result<SaveStats, Error>;
-    fn read(&mut self) -> Result<Option<StoredSave>, Error>;
+    fn commit(&self, bundle: SaveBundle) -> Result<Pending<SaveStats>, Error>;
+    fn read(&self) -> Result<Pending<Option<StoredSave>>, Error>;
+}
+
+pub(crate) struct Pending<T>(Mutex<Receiver<Result<T, Error>>>);
+
+impl<T> Pending<T> {
+    pub(crate) fn poll(&mut self) -> Option<Result<T, Error>> {
+        match self.0.get_mut().expect("receiver poisoned").try_recv() {
+            Ok(result) => Some(result),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(Err(RecvError.into())),
+        }
+    }
+}
+
+impl From<RecvError> for Error {
+    fn from(error: RecvError) -> Self {
+        Self::Io(Box::new(error))
+    }
+}
+
+pub(crate) struct Saving {
+    pub(crate) pending: Pending<SaveStats>,
+    tick: Tick,
+    identities: IdentityChanges,
 }
 
 #[derive(Default, Resource)]
@@ -121,37 +147,61 @@ impl Storage {
         self.backend = None;
     }
 
-    fn backend(&mut self) -> Result<&mut (dyn Backend + 'static), Error> {
-        self.backend.as_deref_mut().ok_or(Error::Closed)
+    pub(crate) fn block_writes(&mut self) {
+        self.blocked = true;
+    }
+
+    pub(crate) fn read(&self) -> Result<Pending<Option<StoredSave>>, Error> {
+        self.backend()?.read()
+    }
+
+    fn backend(&self) -> Result<&dyn Backend, Error> {
+        self.backend.as_deref().ok_or(Error::Closed)
     }
 }
 
-pub(crate) fn save(world: &mut World) -> Result<SaveStats, Error> {
-    if !world.contains_resource::<Storage>() {
-        return Err(Error::MissingPlugin);
-    }
-    if world.resource::<Storage>().is_closed() {
-        return Err(Error::Closed);
-    }
-    if world.resource::<Storage>().blocked {
+pub(crate) fn begin_save(world: &mut World) -> Result<Saving, Error> {
+    let storage = world.resource::<Storage>();
+    storage.backend()?;
+    if storage.blocked {
         return Err(Error::LoadRequired);
     }
     world.flush();
     world.resource_scope(|world, mut registry: Mut<Registry>| {
         let bundle = capture(world, &mut registry)?;
         let tick = world.read_change_tick();
-        let stats = world.resource_mut::<Storage>().backend()?.commit(bundle)?;
+        let pending = world.resource::<Storage>().backend()?.commit(bundle)?;
         for entry in &mut registry.entries {
-            entry.codec.acknowledge(world, tick);
+            entry.codec.begin_commit(world);
         }
-        registry.baseline = true;
-        registry.generation = Some(stats.generation);
-        registry.rewrite_manifest = false;
-        world.resource_mut::<Identities>().acknowledge();
-        // Direct World mutations after this call must not share the saved tick.
+        let identities = world.resource_mut::<Identities>().begin_commit();
+        // Edits after capture must not share its change tick.
         world.increment_change_tick();
-        Ok(stats)
+        Ok(Saving {
+            pending,
+            tick,
+            identities,
+        })
     })
+}
+
+impl Saving {
+    pub(crate) fn finish(self, world: &mut World, result: &Result<SaveStats, Error>) {
+        let committed = result.is_ok();
+        world.resource_scope(|world, mut registry: Mut<Registry>| {
+            for entry in &mut registry.entries {
+                entry.codec.finish_commit(world, self.tick, committed);
+            }
+            if let Ok(stats) = result {
+                registry.baseline = true;
+                registry.generation = Some(stats.generation);
+                registry.rewrite_manifest = false;
+            }
+            world
+                .resource_mut::<Identities>()
+                .finish_commit(self.identities, committed);
+        });
+    }
 }
 
 fn capture(world: &mut World, registry: &mut Registry) -> Result<SaveBundle, Error> {
@@ -201,22 +251,6 @@ fn capture(world: &mut World, registry: &mut Registry) -> Result<SaveBundle, Err
     })
 }
 
-pub(crate) fn load(world: &mut World) -> Result<LoadOutcome, Error> {
-    if !world.contains_resource::<Storage>() {
-        return Err(Error::MissingPlugin);
-    }
-    if world.resource::<Storage>().is_closed() {
-        return Err(Error::Closed);
-    }
-    // Also guards against a panic during user deserialization/component hooks.
-    world.resource_mut::<Storage>().blocked = true;
-    let result = load_inner(world);
-    if result.is_ok() {
-        world.resource_mut::<Storage>().blocked = false;
-    }
-    result
-}
-
 pub(crate) fn can_save(world: &World) -> bool {
     let storage = world.resource::<Storage>();
     !storage.is_closed() && !storage.blocked && world.resource::<Registry>().generation.is_some()
@@ -253,11 +287,11 @@ pub(crate) fn clear_scope(world: &mut World) {
     });
 }
 
-fn load_inner(world: &mut World) -> Result<LoadOutcome, Error> {
+pub(crate) fn restore(world: &mut World, saved: Option<&StoredSave>) -> Result<LoadOutcome, Error> {
     world.flush();
     world.resource_scope(|world, mut registry: Mut<Registry>| {
         registry.started = true;
-        let Some(saved) = world.resource_mut::<Storage>().backend()?.read()? else {
+        let Some(saved) = saved else {
             registry.baseline = false;
             registry.generation = Some(0);
             registry.rewrite_manifest = false;
@@ -267,8 +301,8 @@ fn load_inner(world: &mut World) -> Result<LoadOutcome, Error> {
         restore_records(
             world,
             &mut registry,
-            saved.entities,
-            saved.records,
+            &saved.entities,
+            &saved.records,
             &saved.manifest,
         )?;
         registry.baseline = false;
@@ -295,8 +329,8 @@ fn check_load_manifest(actual: &BTreeMap<String, i64>, registry: &Registry) -> R
 fn restore_records(
     world: &mut World,
     registry: &mut Registry,
-    saved_ids: Vec<i64>,
-    mut records: BTreeMap<String, Vec<(i64, Vec<u8>)>>,
+    saved_ids: &[i64],
+    records: &BTreeMap<String, Vec<(i64, Vec<u8>)>>,
     manifest: &BTreeMap<String, i64>,
 ) -> Result<(), Error> {
     let next = saved_ids
@@ -306,7 +340,8 @@ fn restore_records(
         .checked_add(1)
         .ok_or_else(|| Error::InvalidData("persistent entity IDs exhausted".into()))?;
     let mut actual: HashMap<_, _> = saved_ids
-        .into_iter()
+        .iter()
+        .copied()
         .map(|id| (id, world.spawn_empty().id()))
         .collect();
     let (prepared, references) = entity::references(|| {
@@ -319,12 +354,12 @@ fn restore_records(
                     decoded.push(if manifest.contains_key(entry.key) {
                         entry
                             .codec
-                            .decode(world, records.remove(entry.key).unwrap_or_default())?
+                            .decode(world, records.get(entry.key).map_or(&[], Vec::as_slice))?
                     } else {
                         entry.codec.decode_missing(world)?
                     });
                 }
-                if !records.is_empty() {
+                if records.keys().any(|key| !manifest.contains_key(key)) {
                     return Err(Error::InvalidData("unknown record type".into()));
                 }
                 Ok(decoded)
@@ -413,6 +448,7 @@ mod tests {
     use crate::{AppSaveExt, Capture, SavePlugin, component};
     use bevy_app::App;
     use serde::{Deserialize, Serialize};
+    use std::time::{Duration, Instant};
 
     #[derive(Component, Serialize, Deserialize)]
     struct Value(u32);
@@ -426,7 +462,10 @@ mod tests {
             .persist(component::<Value>("value").capture(Capture::Dirty));
         let world = app.world_mut();
         let removed = world.spawn(Value(1)).id();
-        assert_eq!(save(world).unwrap().generation, 1);
+        let mut saving = begin_save(world).unwrap();
+        let result = complete(&mut saving.pending);
+        saving.finish(world, &result);
+        assert_eq!(result.unwrap().generation, 1);
         world.despawn(removed);
         let added = world.spawn(Value(2)).id();
         let bundle = world
@@ -436,15 +475,26 @@ mod tests {
         world.despawn(added);
         world.spawn(Value(3));
 
-        let mut storage = world.resource_mut::<Storage>();
+        let storage = world.resource::<Storage>();
         let backend = storage.backend().unwrap();
-        let stats = backend.commit(bundle).unwrap();
+        let stats = complete(&mut backend.commit(bundle).unwrap()).unwrap();
         assert_eq!((stats.generation, stats.entities, stats.upserts), (2, 1, 1));
-        let saved = backend.read().unwrap().unwrap();
+        let saved = complete(&mut backend.read().unwrap()).unwrap().unwrap();
         let [(id, bytes)] = saved.records["value"].as_slice() else {
             panic!("expected one saved value");
         };
         assert_eq!(saved.entities, [*id]);
         assert_eq!(serde_json::from_slice::<Value>(bytes).unwrap().0, 2);
+    }
+
+    fn complete<T>(pending: &mut Pending<T>) -> Result<T, Error> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(result) = pending.poll() {
+                return result;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
     }
 }

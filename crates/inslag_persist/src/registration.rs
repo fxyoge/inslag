@@ -297,12 +297,13 @@ pub(crate) trait Codec: Send + Sync {
     fn decode(
         &self,
         world: &mut World,
-        records: Vec<(i64, Vec<u8>)>,
+        records: &[(i64, Vec<u8>)],
     ) -> Result<Box<dyn Decoded>, Error>;
     fn decode_missing(&self, world: &mut World) -> Result<Box<dyn Decoded>, Error> {
-        self.decode(world, Vec::new())
+        self.decode(world, &[])
     }
-    fn acknowledge(&mut self, world: &mut World, tick: Tick);
+    fn begin_commit(&mut self, _world: &mut World) {}
+    fn finish_commit(&mut self, _world: &mut World, _tick: Tick, _committed: bool) {}
     fn reset(&mut self, world: &mut World);
 }
 
@@ -323,6 +324,7 @@ struct ComponentCodec<T: Component, F: ArchetypeFilter + 'static> {
     capture: Capture,
     query: QueryState<(Entity, Ref<'static, T>), F>,
     last_commit: Tick,
+    committing: HashSet<Entity>,
     attached: bool,
 }
 
@@ -356,6 +358,7 @@ where
                         world.query_filtered()
                     },
                     last_commit: Tick::new(0),
+                    committing: HashSet::new(),
                     attached: value.attached,
                 };
                 codec.reset(world);
@@ -514,15 +517,15 @@ where
     fn decode(
         &self,
         _world: &mut World,
-        records: Vec<(i64, Vec<u8>)>,
+        records: &[(i64, Vec<u8>)],
     ) -> Result<Box<dyn Decoded>, Error> {
         let values = records
-            .into_iter()
-            .map(|(id, payload)| {
+            .iter()
+            .map(|&(id, ref payload)| {
                 if id <= 0 {
                     return Err(Error::InvalidData("component stored as a resource".into()));
                 }
-                serde_json::from_slice(&payload)
+                serde_json::from_slice(payload)
                     .map(|value| (id, value))
                     .map_err(|source| Error::Decode {
                         key: self.key,
@@ -533,14 +536,24 @@ where
         Ok(Box::new(DecodedComponent(values)))
     }
 
-    fn acknowledge(&mut self, world: &mut World, tick: Tick) {
-        self.last_commit = tick;
-        world
-            .resource_mut::<Tracking<T>>()
-            .pending
-            .get_mut()
-            .expect("dirty queue poisoned")
-            .clear();
+    fn begin_commit(&mut self, world: &mut World) {
+        let mut tracking = world.resource_mut::<Tracking<T>>();
+        let pending = tracking.pending.get_mut().expect("dirty queue poisoned");
+        std::mem::swap(pending, &mut self.committing);
+    }
+
+    fn finish_commit(&mut self, world: &mut World, tick: Tick, committed: bool) {
+        if committed {
+            self.last_commit = tick;
+            self.committing.clear();
+        } else {
+            world
+                .resource_mut::<Tracking<T>>()
+                .pending
+                .get_mut()
+                .expect("dirty queue poisoned")
+                .extend(self.committing.drain());
+        }
     }
 
     fn reset(&mut self, world: &mut World) {
@@ -577,6 +590,7 @@ impl<T: Component> Decoded for DecodedComponent<T> {
 struct ResourceCodec<T> {
     key: &'static str,
     present: bool,
+    captured_present: bool,
     initialize: fn(&mut World),
     marker: PhantomData<T>,
 }
@@ -591,6 +605,7 @@ impl<T: Resource + Serialize + DeserializeOwned> From<ResourceSave<T>> for Regis
                 Box::new(ResourceCodec::<T> {
                     key: value.key,
                     present: false,
+                    captured_present: false,
                     initialize: value.initialize,
                     marker: PhantomData,
                 })
@@ -640,17 +655,16 @@ impl<T: Resource + Serialize + DeserializeOwned> Codec for ResourceCodec<T> {
     fn decode(
         &self,
         _world: &mut World,
-        records: Vec<(i64, Vec<u8>)>,
+        records: &[(i64, Vec<u8>)],
     ) -> Result<Box<dyn Decoded>, Error> {
         if records.len() > 1 || records.first().is_some_and(|(id, _)| *id != 0) {
             return Err(Error::InvalidData("resource stored as components".into()));
         }
         let value = records
-            .into_iter()
-            .next()
+            .first()
             .map(|(_, payload)| {
                 let decode = || {
-                    serde_json::from_slice(&payload).map_err(|source| Error::Decode {
+                    serde_json::from_slice(payload).map_err(|source| Error::Decode {
                         key: self.key,
                         source,
                     })
@@ -661,8 +675,13 @@ impl<T: Resource + Serialize + DeserializeOwned> Codec for ResourceCodec<T> {
         Ok(Box::new(DecodedResource::<T> { value }))
     }
 
-    fn acknowledge(&mut self, world: &mut World, _: Tick) {
-        self.present = world.contains_resource::<T>();
+    fn begin_commit(&mut self, world: &mut World) {
+        self.captured_present = world.contains_resource::<T>();
+    }
+    fn finish_commit(&mut self, _: &mut World, _: Tick, committed: bool) {
+        if committed {
+            self.present = self.captured_present;
+        }
     }
     fn reset(&mut self, _: &mut World) {
         self.present = false;

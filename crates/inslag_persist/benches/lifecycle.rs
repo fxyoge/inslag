@@ -2,7 +2,10 @@ use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use bevy_time::{Real, Time};
 use divan::{Bencher, black_box};
-use inslag_persist::{AppSaveExt, Capture, SavePlugin, SaveStatus, WorldSaveExt, component};
+use inslag_persist::{AppSaveExt, Capture, SavePlugin, SaveStatus, component};
+#[path = "../tests/support/requests.rs"]
+mod requests;
+use requests::Requests;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
@@ -40,7 +43,7 @@ fn idle_update(bencher: Bencher) {
 fn full_save(bencher: Bencher, entities: usize) {
     bencher
         .with_inputs(|| setup(entities))
-        .bench_local_refs(|(app, _)| black_box(app.world_mut().save().unwrap()));
+        .bench_local_refs(|(app, _)| black_box(app.save_request().unwrap()));
 }
 
 #[divan::bench(args = [1_000, 10_000], sample_size = 1, sample_count = 20)]
@@ -48,7 +51,7 @@ fn autosave_frame(bencher: Bencher, entities: usize) {
     bencher
         .with_inputs(|| {
             let (mut app, directory) = setup(entities);
-            assert_eq!(app.world_mut().save().unwrap().upserts, entities);
+            assert_eq!(app.save_request().unwrap().upserts, entities);
             app.add_systems(Update, simulate);
             (app, directory)
         })
@@ -57,7 +60,7 @@ fn autosave_frame(bencher: Bencher, entities: usize) {
                 .resource_mut::<Time<Real>>()
                 .advance_by(Duration::from_secs(1));
             app.update();
-            black_box(app.world().resource::<SaveStatus>().last_save());
+            black_box(app.world().resource::<SaveStatus>().is_saving());
         });
 }
 
@@ -66,7 +69,7 @@ fn load(bencher: Bencher, entities: usize) {
     bencher
         .with_inputs(|| {
             let (mut writer, directory) = setup(entities);
-            assert_eq!(writer.world_mut().save().unwrap().upserts, entities);
+            assert_eq!(writer.save_request().unwrap().upserts, entities);
             drop(writer);
             let mut reader = App::new();
             reader
@@ -74,7 +77,7 @@ fn load(bencher: Bencher, entities: usize) {
                 .persist(component::<Record>("record"));
             (reader, directory)
         })
-        .bench_local_refs(|(app, _)| black_box(app.world_mut().load().unwrap()));
+        .bench_local_refs(|(app, _)| black_box(app.load_request().unwrap()));
 }
 
 fn main() {
@@ -90,32 +93,23 @@ fn main() {
 fn frames() {
     for entities in [1_000, 10_000] {
         let (mut app, _directory) = setup(entities);
-        assert_eq!(app.world_mut().save().unwrap().upserts, entities);
+        assert_eq!(app.save_request().unwrap().upserts, entities);
         app.add_systems(Update, simulate);
         let mut idle = Vec::new();
         let mut saves = Vec::new();
-        let mut generation = 1;
         for _ in 0..1_200 {
             app.world_mut()
                 .resource_mut::<Time<Real>>()
                 .advance_by(Duration::from_millis(20));
+            let was_saving = app.world().resource::<SaveStatus>().is_saving();
             let start = Instant::now();
             app.update();
             let elapsed = start.elapsed().as_nanos() as u64;
-            let current = app
-                .world()
-                .resource::<SaveStatus>()
-                .last_save()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .generation;
-            if current != generation {
+            if !was_saving && app.world().resource::<SaveStatus>().is_saving() {
                 saves.push(elapsed);
             } else {
                 idle.push(elapsed);
             }
-            generation = current;
         }
         for (kind, mut samples) in [("idle", idle), ("save", saves)] {
             samples.sort_unstable();
@@ -133,6 +127,7 @@ fn setup(entities: usize) -> (App, tempfile::TempDir) {
     app.init_resource::<Time<Real>>()
         .add_plugins(
             SavePlugin::sqlite(directory.path().join("save.sqlite"))
+                .load_on_start(false)
                 .autosave(Duration::from_secs(1)),
         )
         .persist(component::<Record>("record").capture(Capture::Changed));

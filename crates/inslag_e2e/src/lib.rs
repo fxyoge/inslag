@@ -572,8 +572,8 @@ impl Runner {
                 self.lua.to_value_with(&serde_json::json!({
                     "loading": status.is_loading(),
                     "writable": status.can_save(),
-                    "load_error": status.load().and_then(|result| result.as_ref().err()),
-                    "save_error": status.last_save().and_then(|result| result.as_ref().err()),
+                    "load_error": status.load().and_then(|result| result.as_ref().err()).map(ToString::to_string),
+                    "save_error": status.last_save().and_then(|result| result.as_ref().err()).map(ToString::to_string),
                     "generation": status.last_save().and_then(|result| result.as_ref().ok()).map(|stats| stats.generation),
                 }), mlua::SerializeOptions::new().serialize_none_to_null(false).serialize_unit_to_null(false)).map_err(err)
             }

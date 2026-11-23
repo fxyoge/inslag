@@ -3,11 +3,13 @@ use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use bevy_time::TimePlugin;
 use inslag_persist::{
-    AppSaveExt, Capture, Error, LoadOutcome, SaveOpened, SavePlugin, SaveStatus, WorldSaveExt,
-    component,
+    AppSaveExt, Capture, LoadOutcome, SaveOpened, SavePlugin, SaveRequest, SaveStatus, component,
 };
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 #[derive(Component, Serialize, Deserialize)]
 struct Node {
@@ -26,7 +28,7 @@ struct Account {
 struct Transient;
 
 fn fresh(status: Res<SaveStatus>) -> bool {
-    status.load() == Some(&Ok(LoadOutcome::Missing))
+    matches!(status.load(), Some(Ok(LoadOutcome::Missing)))
 }
 
 fn initialize(mut commands: Commands) {
@@ -42,7 +44,7 @@ fn simulate(mut nodes: Query<&mut Node>) {
     }
 }
 
-fn main() -> Result<(), Error> {
+fn main() {
     let path = std::env::args_os()
         .nth(1)
         .map(PathBuf::from)
@@ -64,6 +66,7 @@ fn main() -> Result<(), Error> {
         .add_systems(Update, simulate);
     app.world_mut().spawn(Transient);
     app.update();
+    settle(&mut app);
     let status = app.world().resource::<SaveStatus>();
     println!("{:?}: {:?}", status.path(), status.load());
     if !status.can_save() {
@@ -73,7 +76,28 @@ fn main() -> Result<(), Error> {
         std::thread::sleep(Duration::from_millis(10));
         app.update();
     }
-    let stats = app.world_mut().save()?;
+    settle(&mut app);
+    app.world_mut().write_message(SaveRequest::Save);
+    app.update();
+    settle(&mut app);
+    let stats = app
+        .world()
+        .resource::<SaveStatus>()
+        .last_save()
+        .unwrap()
+        .as_ref()
+        .unwrap();
     println!("Final save: {stats:?}");
-    Ok(())
+}
+
+fn settle(app: &mut App) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while {
+        let status = app.world().resource::<SaveStatus>();
+        status.is_loading() || status.is_saving()
+    } {
+        assert!(Instant::now() < deadline, "persistence did not settle");
+        std::thread::sleep(Duration::from_millis(1));
+        app.update();
+    }
 }

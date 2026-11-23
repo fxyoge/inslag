@@ -1,7 +1,10 @@
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use divan::{Bencher, black_box};
-use inslag_persist::{AppSaveExt, Capture, Dirty, SavePlugin, WorldSaveExt, component};
+use inslag_persist::{AppSaveExt, Capture, Dirty, SavePlugin, component};
+#[path = "../tests/support/requests.rs"]
+mod requests;
+use requests::Requests;
 use serde::{Deserialize, Serialize};
 
 #[derive(Component, Serialize, Deserialize)]
@@ -40,12 +43,14 @@ fn commit(bencher: Bencher, entities: usize) {
         .with_inputs(|| {
             let directory = tempfile::tempdir().unwrap();
             let mut app = App::new();
-            app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")))
-                .persist(component::<Player>("player"))
-                .persist(component::<Machine>("machine").capture(Capture::Dirty))
-                .persist_resource::<Research>("research")
-                .insert_resource(Research { tick: 0 })
-                .add_systems(Update, simulate);
+            app.add_plugins(
+                SavePlugin::sqlite(directory.path().join("save.sqlite")).load_on_start(false),
+            )
+            .persist(component::<Player>("player"))
+            .persist(component::<Machine>("machine").capture(Capture::Dirty))
+            .persist_resource::<Research>("research")
+            .insert_resource(Research { tick: 0 })
+            .add_systems(Update, simulate);
             app.update();
             let owner = app.world_mut().spawn(Player { health: 100 }).id();
             app.world_mut().spawn_batch((0..entities).map(|_| Machine {
@@ -53,14 +58,14 @@ fn commit(bencher: Bencher, entities: usize) {
                 owner,
             }));
             app.update();
-            let initial = app.world_mut().save().unwrap();
+            let initial = app.save_request().unwrap();
             assert_eq!(initial.entities, entities + 1);
             assert_eq!(initial.upserts, entities + 2);
             (app, directory)
         })
         .bench_local_refs(|(app, _directory)| {
             app.update();
-            black_box(app.world_mut().save().unwrap())
+            black_box(app.save_request().unwrap())
         });
 }
 

@@ -103,45 +103,9 @@ use std::time::Duration;
 
 type ConfigureReadiness = Box<dyn Fn(&mut App) + Send + Sync>;
 
-pub trait WorldSaveExt {
-    /// Save immediately and return the write statistics.
-    ///
-    /// Apply pending system commands first, or send [`SaveRequest::Save`] instead.
-    /// An existing file must load successfully before it can be overwritten.
-    /// Failed saves keep pending changes for retry.
-    fn save(&mut self) -> Result<SaveStats, Error>;
-
-    /// Reload the current file, replacing saved entities and resources.
-    ///
-    /// Invalid data leaves current values unchanged. Side effects from component
-    /// hooks cannot be undone if a hook fails during loading.
-    fn load(&mut self) -> Result<LoadOutcome, Error>;
-}
-
 /// A missing save is a fresh session, not a load failure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoadOutcome {
     Missing,
     Loaded,
-}
-
-impl WorldSaveExt for World {
-    fn save(&mut self) -> Result<SaveStats, Error> {
-        lifecycle::run_idle(self, |world| {
-            let result = storage::save(world);
-            lifecycle::record_save(world, &result);
-            result
-        })
-    }
-
-    fn load(&mut self) -> Result<LoadOutcome, Error> {
-        lifecycle::run_idle(self, |world| {
-            let result = storage::load(world);
-            if matches!(result, Ok(LoadOutcome::Missing)) {
-                storage::clear_scope(world);
-            }
-            lifecycle::record_load(world, &result);
-            result
-        })
-    }
 }

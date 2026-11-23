@@ -1,6 +1,12 @@
-use super::{Backend, Error, SaveBundle, SaveStats, StoredSave};
+use super::{Backend, Error, Pending, SaveBundle, SaveStats, StoredSave};
 use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
-use std::{collections::BTreeMap, path::PathBuf, sync::Mutex, time::Duration};
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::{Mutex, mpsc},
+    thread,
+    time::Duration,
+};
 
 const APPLICATION_ID: i64 = 0x4749_4741;
 const FORMAT: i64 = 1;
@@ -13,20 +19,71 @@ impl From<rusqlite::Error> for Error {
 
 pub(super) struct Sqlite {
     path: PathBuf,
-    // The backend is only accessed mutably, so this supplies Sync without locking.
-    connection: Mutex<Option<Connection>>,
+    worker: Mutex<Option<mpsc::Sender<Job>>>,
+}
+
+type Job = Box<dyn FnOnce(&mut Database) + Send>;
+
+struct Database {
+    path: PathBuf,
+    connection: Option<Connection>,
 }
 
 impl Sqlite {
     pub(super) fn new(path: PathBuf) -> Self {
         Self {
             path,
-            connection: Mutex::new(None),
+            worker: Mutex::default(),
         }
     }
 
+    fn submit<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&mut Database) -> Result<T, Error> + Send + 'static,
+    ) -> Result<Pending<T>, Error> {
+        let mut worker = self.worker.lock().expect("worker poisoned");
+        if worker.is_none() {
+            let (send, receive) = mpsc::channel::<Job>();
+            let path = self.path.clone();
+            thread::Builder::new()
+                .name("inslag-sqlite".into())
+                .spawn(move || {
+                    // Closing the last connection can itself write to SQLite's WAL.
+                    let mut database = Database {
+                        path,
+                        connection: None,
+                    };
+                    for job in receive {
+                        job(&mut database);
+                    }
+                })?;
+            *worker = Some(send);
+        }
+        let (send, receive) = mpsc::channel();
+        worker
+            .as_ref()
+            .expect("initialized worker")
+            .send(Box::new(move |database| {
+                let _ = send.send(operation(database));
+            }))
+            .map_err(|_| mpsc::RecvError)?;
+        Ok(Pending(Mutex::new(receive)))
+    }
+}
+
+impl Backend for Sqlite {
+    fn commit(&self, bundle: SaveBundle) -> Result<Pending<SaveStats>, Error> {
+        self.submit(move |database| database.commit(bundle))
+    }
+
+    fn read(&self) -> Result<Pending<Option<StoredSave>>, Error> {
+        self.submit(Database::read)
+    }
+}
+
+impl Database {
     fn connection(&mut self, create: bool) -> Result<&mut Connection, Error> {
-        let slot = self.connection.get_mut().expect("storage mutex poisoned");
+        let slot = &mut self.connection;
         if slot.is_none() {
             let mut flags = OpenFlags::SQLITE_OPEN_READ_WRITE;
             if create {
@@ -93,9 +150,6 @@ impl Sqlite {
         }
         Ok(slot.as_mut().expect("initialized connection"))
     }
-}
-
-impl Backend for Sqlite {
     fn commit(&mut self, mut bundle: SaveBundle) -> Result<SaveStats, Error> {
         // Dirty sets have hash order. Cluster writes to avoid bouncing between pages.
         bundle
@@ -193,12 +247,7 @@ impl Backend for Sqlite {
     }
 
     fn read(&mut self) -> Result<Option<StoredSave>, Error> {
-        if self
-            .connection
-            .get_mut()
-            .expect("storage mutex poisoned")
-            .is_none()
-        {
+        if self.connection.is_none() {
             match std::fs::metadata(&self.path) {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
                 Err(error) => return Err(error.into()),

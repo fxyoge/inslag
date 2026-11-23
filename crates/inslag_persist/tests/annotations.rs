@@ -1,8 +1,13 @@
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_transform::components::Transform;
-use inslag_persist::{Error, LoadOutcome, SavePlugin, SaveRequest, SaveStatus, WorldSaveExt, save};
+use inslag_persist::{Error, LoadOutcome, SavePlugin, SaveRequest, SaveStatus, save};
 use serde::{Deserialize, Serialize};
+mod support;
+use support::settle;
+#[path = "support/requests.rs"]
+mod requests;
+use requests::Requests;
 
 #[save(resource, key = "tiny.score")]
 #[derive(Resource, Default, Serialize, Deserialize)]
@@ -39,7 +44,7 @@ fn app() -> App {
 fn request(app: &mut App, request: SaveRequest) {
     app.world_mut().write_message(request);
     app.update();
-    app.update();
+    settle(app);
 }
 
 #[test]
@@ -108,7 +113,7 @@ fn failed_restore_leaves_resources_and_entities_intact_without_running_construct
     app.world_mut()
         .entity_mut(actor)
         .insert(Actor { peer: actor });
-    app.world_mut().save().unwrap();
+    app.save_request().unwrap();
     let count = app.world().entities().len();
     let constructors = app.world().resource::<Platform>().1;
     rusqlite::Connection::open(path)
@@ -119,7 +124,7 @@ fn failed_restore_leaves_resources_and_entities_intact_without_running_construct
         )
         .unwrap();
     assert!(matches!(
-        app.world_mut().load(),
+        app.load_request(),
         Err(Error::Decode {
             key: "tiny.score",
             ..
@@ -142,24 +147,27 @@ fn finishing_a_deferred_open_never_creates_an_unscheduled_save() {
     app.insert_resource(Platform(17, 0))
         .insert_resource(AssetsReady(false))
         .add_plugins(SavePlugin::default().enabled_when(|ready: Res<AssetsReady>| ready.0));
-    request(&mut app, SaveRequest::Open(path.clone()));
+    app.world_mut()
+        .write_message(SaveRequest::Open(path.clone()));
+    app.update();
     assert!(app.world().resource::<SaveStatus>().is_loading());
     app.world_mut().resource_mut::<AssetsReady>().0 = true;
     app.update();
+    settle(&mut app);
     assert!(app.world().resource::<SaveStatus>().can_save());
     assert!(app.world().resource::<SaveStatus>().last_save().is_none());
     assert!(!path.exists());
 }
 
 #[test]
-fn direct_load_uses_the_same_fresh_resource_contract_as_requests() {
+fn load_request_initializes_fresh_resources() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("direct.sqlite");
     let mut app = App::new();
     app.insert_resource(Platform(17, 0))
         .add_plugins(SavePlugin::sqlite(&path).load_on_start(false))
         .insert_resource(Score(99));
-    assert_eq!(app.world_mut().load().unwrap(), LoadOutcome::Missing);
+    assert_eq!(app.load_request().unwrap(), LoadOutcome::Missing);
     assert_eq!(app.world().resource::<Score>().0, 0);
     assert_eq!(app.world().resource::<SessionSeed>().0, 17);
     assert_eq!(app.world().resource::<Platform>().1, 1);

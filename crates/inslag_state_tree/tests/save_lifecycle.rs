@@ -2,12 +2,13 @@
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_time::{Real, Time, TimePlugin};
-use inslag_persist::{
-    LoadOutcome, SaveOpened, SavePlugin, SaveRequest, SaveSettings, SaveStatus, WorldSaveExt,
-};
+use inslag_persist::{LoadOutcome, SaveOpened, SavePlugin, SaveRequest, SaveSettings, SaveStatus};
 use inslag_state_tree::persistence::AppPersistenceExt;
 use serde::{Deserialize, Serialize};
-use std::{path::Path, time::Duration};
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
 
 #[derive(Resource, Default, Serialize, Deserialize)]
 struct Score(u64);
@@ -22,7 +23,10 @@ fn app() -> App {
         .persist_resource::<Score>("score")
         .add_plugins(SavePlugin::default().enabled_when(|ready: Res<Ready>| ready.0))
         .add_systems(SaveOpened, |world: &mut World| {
-            if world.resource::<SaveStatus>().load() == Some(&Ok(LoadOutcome::Missing)) {
+            if matches!(
+                world.resource::<SaveStatus>().load(),
+                Some(Ok(LoadOutcome::Missing))
+            ) {
                 world.insert_resource(Score(10));
             }
         });
@@ -36,7 +40,19 @@ fn open(app: &mut App, path: &Path) {
 fn request(app: &mut App, request: SaveRequest) {
     app.world_mut().write_message(request);
     app.update();
-    app.update();
+    settle(app);
+}
+
+fn settle(app: &mut App) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while {
+        let status = app.world().resource::<SaveStatus>();
+        status.is_loading() || status.is_saving()
+    } {
+        assert!(Instant::now() < deadline, "persistence did not settle");
+        std::thread::yield_now();
+        app.update();
+    }
 }
 
 #[test]
@@ -63,10 +79,10 @@ fn never_suppresses_automatic_saves_but_manual_saves_restore_in_a_fresh_app() {
     );
     let mut second = app();
     open(&mut second, &path);
-    assert_eq!(
+    assert!(matches!(
         second.world().resource::<SaveStatus>().load(),
-        Some(&Ok(LoadOutcome::Loaded))
-    );
+        Some(Ok(LoadOutcome::Loaded))
+    ));
     assert_eq!(second.world().resource::<Score>().0, 93);
 }
 
@@ -82,6 +98,7 @@ fn settings_changes_reset_deadlines_and_never_cancels_an_existing_deadline() {
         .resource_mut::<Time<Real>>()
         .advance_by(Duration::from_secs(11));
     app.update();
+    settle(&mut app);
     assert!(path.exists());
     let generation = app
         .world()
@@ -167,7 +184,17 @@ fn a_caller_can_save_before_exiting_without_autosave() {
     let mut app = app();
     open(&mut app, &path);
     app.world_mut().resource_mut::<Score>().0 = 83;
-    assert_eq!(app.world_mut().save().unwrap().generation, 1);
+    request(&mut app, SaveRequest::Save);
+    assert_eq!(
+        app.world()
+            .resource::<SaveStatus>()
+            .last_save()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .generation,
+        1
+    );
     app.world_mut().write_message(AppExit::Success);
     app.update();
     assert!(app.should_exit().is_some());
@@ -180,7 +207,7 @@ fn a_caller_can_save_before_exiting_without_autosave() {
 #[test]
 fn preparation_commands_get_a_normal_cleanup_frame_before_capture() {
     use bevy_app::Update;
-    use inslag_persist::{Error, PrepareSave};
+    use inslag_persist::PrepareSave;
     #[derive(Component, Serialize, Deserialize)]
     struct Owner;
     #[derive(Resource, Default, Serialize, Deserialize)]
@@ -217,10 +244,10 @@ fn preparation_commands_get_a_normal_cleanup_frame_before_capture() {
     app.world_mut().write_message(SaveRequest::Save);
     app.update();
     assert!(!path.exists());
-    assert!(matches!(app.world_mut().save(), Err(Error::Busy)));
+    assert!(app.world().resource::<SaveStatus>().is_saving());
     app.world_mut().write_message(SaveRequest::Save);
     app.update();
-    app.update();
+    settle(&mut app);
     assert_eq!(
         app.world()
             .resource::<SaveStatus>()

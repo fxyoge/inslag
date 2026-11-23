@@ -698,7 +698,8 @@ mod tests {
     #[cfg(feature = "persistence")]
     #[test]
     fn binding_restore_rebuilds_listener_and_delivers_a_fresh_initial_sample() {
-        use inslag_persist::{AppSaveExt, SavePlugin, WorldSaveExt};
+        use crate::persistence_test::Requests;
+        use inslag_persist::{AppSaveExt, SavePlugin};
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("save.sqlite");
         let mut source = binding_app();
@@ -716,7 +717,7 @@ mod tests {
         source.update();
         source.update();
         assert_binding_data(source.world(), original, 1, "idle", "first");
-        source.world_mut().save().unwrap();
+        source.save_request().unwrap();
         let mut target = binding_app();
         target
             .add_plugins(SavePlugin::sqlite(&path).load_on_start(false))
@@ -725,7 +726,7 @@ mod tests {
             .world_mut()
             .resource_mut::<Assets<StateTreeDefinition>>()
             .add(binding_definition());
-        target.world_mut().load().unwrap();
+        target.load_request().unwrap();
         let restored = target
             .world_mut()
             .query_filtered::<Entity, bevy_ecs::prelude::With<StateTreeInstance>>()

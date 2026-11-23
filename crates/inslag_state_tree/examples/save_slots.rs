@@ -8,6 +8,7 @@ use bevy_time::TimePlugin;
 use inslag_persist::{LoadOutcome, SaveOpened, SavePlugin, SaveRequest, SaveSettings, SaveStatus};
 use inslag_state_tree::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::time::{Duration, Instant};
 
 #[inslag_persist::save(resource, key = "example.score")]
 #[derive(Resource, Default, Serialize, Deserialize)]
@@ -16,7 +17,7 @@ struct Score(u64);
 struct Definition(Handle<StateTreeDefinition>);
 
 fn fresh(status: Res<SaveStatus>, definition: Res<Definition>, mut commands: Commands) {
-    if status.load() == Some(&Ok(LoadOutcome::Missing)) {
+    if matches!(status.load(), Some(Ok(LoadOutcome::Missing))) {
         commands.insert_resource(Score(10));
         commands.spawn((
             StateTreeInstance::new(definition.0.clone()),
@@ -49,11 +50,12 @@ fn main() {
     app.world_mut()
         .write_message(SaveRequest::Open(path.into()));
     app.update();
+    settle(&mut app);
     assert!(app.world().resource::<SaveStatus>().can_save());
     app.world_mut().resource_mut::<Score>().0 += 1;
     app.world_mut().write_message(SaveRequest::Save);
     app.update();
-    app.update();
+    settle(&mut app);
     assert!(
         app.world()
             .resource::<SaveStatus>()
@@ -62,4 +64,16 @@ fn main() {
             .is_ok()
     );
     println!("saved score {}", app.world().resource::<Score>().0);
+}
+
+fn settle(app: &mut App) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while {
+        let status = app.world().resource::<SaveStatus>();
+        status.is_loading() || status.is_saving()
+    } {
+        assert!(Instant::now() < deadline, "persistence did not settle");
+        std::thread::sleep(Duration::from_millis(1));
+        app.update();
+    }
 }

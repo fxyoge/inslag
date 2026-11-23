@@ -44,8 +44,7 @@ impl SavePlugin {
 
     /// Allow loading and saving only while this condition is true.
     ///
-    /// Use this to wait for assets or other setup. A failed load still blocks
-    /// saving, and direct [`WorldSaveExt::save`] calls bypass the condition.
+    /// Use this to wait for assets or other setup. A failed load still blocks saving.
     pub fn enabled_when<M>(
         mut self,
         condition: impl SystemCondition<M> + Clone + Send + Sync + 'static,
