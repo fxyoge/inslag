@@ -1,2 +1,2 @@
 [tools]
-rust = { version = "1.97.1", profile = "minimal" }
+rust = { version = "1.100.0", profile = "minimal" }
