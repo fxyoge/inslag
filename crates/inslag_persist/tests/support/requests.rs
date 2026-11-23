@@ -1,6 +1,8 @@
 use bevy_app::{App, Last};
 use bevy_ecs::message::Messages;
-use inslag_persist::{Error, SaveCompleted, SaveHandle, SaveRequest, SaveStats, SaveStatus};
+use inslag_persist::{
+    Error, SaveCompleted, SaveHandle, SaveInfo, SaveRequest, SaveStats, SaveStatus,
+};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -17,7 +19,7 @@ pub(crate) trait Requests {
     fn load_request(&mut self, handle: SaveHandle) -> Result<(), Arc<Error>>;
     fn new_request(&mut self) -> SaveHandle;
     fn close_request(&mut self);
-    fn list_request(&mut self) -> Result<Vec<SaveHandle>, Arc<Error>>;
+    fn list_request(&mut self) -> Result<Vec<SaveInfo>, Arc<Error>>;
     fn reload(&mut self) -> Result<(), Arc<Error>>;
 }
 
@@ -73,7 +75,7 @@ impl Requests for App {
         }
     }
 
-    fn list_request(&mut self) -> Result<Vec<SaveHandle>, Arc<Error>> {
+    fn list_request(&mut self) -> Result<Vec<SaveInfo>, Arc<Error>> {
         match self.request(SaveRequest::List) {
             SaveCompleted::List(result) => result,
             other => panic!("unexpected completion: {other:?}"),

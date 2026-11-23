@@ -80,7 +80,7 @@ fn never_suppresses_automatic_saves_but_manual_saves_restore_in_a_fresh_app() {
     );
     let mut second = app(directory.path());
     let saves = second.list_request().unwrap();
-    second.load_request(saves[0]).unwrap();
+    second.load_request(saves[0].handle).unwrap();
     assert!(matches!(
         second.world().resource::<SaveStatus>().load(),
         Some(Ok(LoadOutcome::Loaded))
@@ -100,7 +100,9 @@ fn settings_changes_reset_deadlines_and_never_cancels_an_existing_deadline() {
         .advance_by(Duration::from_secs(11));
     app.update();
     settle(&mut app);
-    assert_eq!(app.list_request().unwrap(), [save]);
+    let listed = app.list_request().unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].handle, save);
     let generation = app
         .world()
         .resource::<SaveStatus>()

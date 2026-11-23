@@ -1,5 +1,5 @@
 use crate::{
-    Error, SaveHandle, SaveStats,
+    Error, SaveHandle, SaveInfo, SaveStats,
     storage::{self, Pending, Saving, Storage, StoredSave},
 };
 use bevy_ecs::{
@@ -45,7 +45,7 @@ pub enum SaveRequest {
 
 #[derive(Message, Clone, Debug)]
 pub enum SaveCompleted {
-    List(Result<Vec<SaveHandle>, Arc<Error>>),
+    List(Result<Vec<SaveInfo>, Arc<Error>>),
     New(Result<SaveHandle, Arc<Error>>),
     Load {
         handle: SaveHandle,
@@ -115,7 +115,7 @@ enum Operation {
 #[derive(Resource)]
 pub(crate) struct SaveSession {
     operation: Option<Operation>,
-    listing: Option<Pending<Vec<SaveHandle>>>,
+    listing: Option<Pending<Vec<SaveInfo>>>,
     deadline: Duration,
     interval: Option<Duration>,
     enabled: bool,

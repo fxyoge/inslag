@@ -51,8 +51,9 @@ fn main() {
     };
     let saves = saves.unwrap();
     let open = saves
-        .first()
-        .map_or(SaveRequest::New, |handle| SaveRequest::Load(*handle));
+        .iter()
+        .max_by_key(|save| save.created_at)
+        .map_or(SaveRequest::New, |save| SaveRequest::Load(save.handle));
     app.world_mut().write_message(open);
     app.update();
     settle(&mut app);

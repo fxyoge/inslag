@@ -1,5 +1,5 @@
 use crate::{
-    SaveHandle, entity,
+    SaveHandle, SaveInfo, entity,
     identity::{Identities, Identity, IdentityChanges},
     registration::{Batch, Registry},
 };
@@ -101,7 +101,7 @@ pub(crate) struct StoredSave {
 trait Backend: Send + Sync {
     fn commit(&self, handle: SaveHandle, bundle: SaveBundle) -> Result<Pending<SaveStats>, Error>;
     fn read(&self, handle: SaveHandle) -> Result<Pending<StoredSave>, Error>;
-    fn list(&self) -> Result<Pending<Vec<SaveHandle>>, Error>;
+    fn list(&self) -> Result<Pending<Vec<SaveInfo>>, Error>;
 }
 
 pub(crate) struct Pending<T>(Mutex<Receiver<Result<T, Error>>>);
@@ -144,7 +144,7 @@ impl Storage {
         self.backend.read(handle)
     }
 
-    pub(crate) fn list(&self) -> Result<Pending<Vec<SaveHandle>>, Error> {
+    pub(crate) fn list(&self) -> Result<Pending<Vec<SaveInfo>>, Error> {
         self.backend.list()
     }
 }
@@ -429,7 +429,7 @@ mod tests {
     use crate::{AppSaveExt, Capture, SavePlugin, component};
     use bevy_app::App;
     use serde::{Deserialize, Serialize};
-    use std::time::{Duration, Instant};
+    use std::time::{Duration, Instant, UNIX_EPOCH};
 
     #[derive(Component, Serialize, Deserialize)]
     struct Value(u32);
@@ -467,6 +467,34 @@ mod tests {
         };
         assert_eq!(saved.entities, [*id]);
         assert_eq!(serde_json::from_slice::<Value>(bytes).unwrap().0, 2);
+    }
+
+    #[test]
+    fn aborted_first_commit_does_not_publish_creation_metadata() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new();
+        app.add_plugins(SavePlugin::sqlite(directory.path()))
+            .persist(component::<Value>("value"));
+        let world = app.world_mut();
+        let handle = SaveHandle(1);
+        start_fresh(world);
+        world.spawn(Value(1));
+        let mut bundle = world
+            .resource_scope(|world, mut registry: Mut<Registry>| capture(world, &mut registry))
+            .unwrap();
+        bundle.batch.upserts[0].references.push(i64::MAX);
+        let backend = &world.resource::<Storage>().backend;
+        assert!(complete(&mut backend.commit(handle, bundle).unwrap()).is_err());
+        assert!(complete(&mut backend.list().unwrap()).unwrap().is_empty());
+
+        let mut saving = begin_save(world, handle).unwrap();
+        let result = complete(&mut saving.pending);
+        saving.finish(world, &result);
+        assert_eq!(result.unwrap().generation, 1);
+        let saves = complete(&mut world.resource::<Storage>().list().unwrap()).unwrap();
+        assert_eq!(saves.len(), 1);
+        assert_eq!(saves[0].handle, handle);
+        assert!(saves[0].created_at > UNIX_EPOCH);
     }
 
     fn complete<T>(pending: &mut Pending<T>) -> Result<T, Error> {

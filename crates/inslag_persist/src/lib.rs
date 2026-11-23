@@ -83,16 +83,23 @@ pub mod __private {
 
 pub mod prelude {
     pub use crate::{
-        SaveCompleted, SaveHandle, SavePlugin, SaveRequest, SaveSettings, SaveStatus, save,
+        SaveCompleted, SaveHandle, SaveInfo, SavePlugin, SaveRequest, SaveSettings, SaveStatus,
+        save,
     };
 }
 
 use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::SystemCondition;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 type ConfigureReadiness = Box<dyn Fn(&mut App) + Send + Sync>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SaveHandle(u128);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SaveInfo {
+    pub handle: SaveHandle,
+    pub created_at: SystemTime,
+}

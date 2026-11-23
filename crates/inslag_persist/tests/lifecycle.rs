@@ -2,12 +2,15 @@ use bevy_app::{App, AppExit, Update};
 use bevy_ecs::{prelude::*, system::RunSystemOnce};
 use bevy_time::{Real, Time};
 use inslag_persist::{
-    AppSaveExt, Capture, Dirty, Error, LoadOutcome, SaveCompleted, SaveOpened, SavePlugin,
-    SaveRequest, SaveStatus, component,
+    AppSaveExt, Capture, Dirty, Error, LoadOutcome, SaveCompleted, SaveInfo, SaveOpened,
+    SavePlugin, SaveRequest, SaveStatus, component,
 };
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use std::{path::Path, time::Duration};
+use std::{
+    path::Path,
+    time::{Duration, UNIX_EPOCH},
+};
 mod support;
 use support::settle;
 #[path = "support/requests.rs"]
@@ -211,7 +214,9 @@ fn explicit_session_switches_isolate_saves_and_preserve_unrelated_entities() {
     assert_ne!(a, b);
     assert_eq!(app.world().resource::<Counter>().0, 10); // fresh, not copied from A
     app.world_mut().resource_mut::<Counter>().0 = 52;
-    assert_eq!(app.list_request().unwrap(), [a]);
+    let listed = app.list_request().unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].handle, a);
     assert_eq!(app.world().resource::<Counter>().0, 52);
     app.save_request().unwrap();
     assert_eq!(app.list_request().unwrap().len(), 2);
@@ -284,7 +289,9 @@ fn new_and_load_reject_an_open_session_without_writing() {
     assert!(app.world().resource::<SaveStatus>().can_save());
     assert_eq!(app.world().resource::<Counter>().0, 77);
     app.close_request();
-    assert_eq!(app.list_request().unwrap(), [target]);
+    let listed = app.list_request().unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].handle, target);
     assert_eq!(generation(&only_file(directory.path())), 1);
 }
 
@@ -374,7 +381,7 @@ fn a_due_autosave_does_not_duplicate_an_explicit_save() {
 }
 
 #[test]
-fn list_returns_committed_handles_and_ignores_unfinished_databases() {
+fn list_returns_creation_metadata_and_ignores_unfinished_databases() {
     let directory = tempfile::tempdir().unwrap();
     let mut writer = app(directory.path());
     let committed = writer.new_request();
@@ -386,18 +393,42 @@ fn list_returns_committed_handles_and_ignores_unfinished_databases() {
     let connection = Connection::open(unfinished).unwrap();
     connection
         .execute_batch(
-            "PRAGMA application_id = 1195984705; PRAGMA user_version = 1;
-         CREATE TABLE meta (singleton INTEGER PRIMARY KEY, generation INTEGER);
-         INSERT INTO meta VALUES (1, 0);",
+            "PRAGMA application_id = 1195984705; PRAGMA user_version = 2;
+         CREATE TABLE meta (singleton INTEGER PRIMARY KEY, generation INTEGER, created_at_ms INTEGER);
+         INSERT INTO meta VALUES (1, 0, 0);",
         )
         .unwrap();
     std::fs::write(directory.path().join("notes.txt"), b"not a save").unwrap();
     let mut reader = app(directory.path());
-    let handles = reader.list_request().unwrap();
-    assert_eq!(handles, [committed]);
+    let saves = reader.list_request().unwrap();
+    assert_eq!(saves.len(), 1);
+    assert_eq!(saves[0].handle, committed);
+    assert!(saves[0].created_at > UNIX_EPOCH);
     assert_eq!(reader.world().resource::<SaveStatus>().handle(), None);
-    reader.load_request(handles[0]).unwrap();
+    reader.load_request(saves[0].handle).unwrap();
     assert_eq!(reader.world().resource::<Counter>().0, 81);
+}
+
+#[test]
+fn resaving_preserves_the_creation_timestamp() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut writer = app(directory.path());
+    let handle = writer.new_request();
+    writer.save_request().unwrap();
+    let connection = Connection::open(only_file(directory.path())).unwrap();
+    connection
+        .execute("UPDATE meta SET created_at_ms = 123456", [])
+        .unwrap();
+    writer.close_request();
+    writer.load_request(handle).unwrap();
+    writer.save_request().unwrap();
+    assert_eq!(
+        writer.list_request().unwrap(),
+        [SaveInfo {
+            handle,
+            created_at: UNIX_EPOCH + Duration::from_millis(123456),
+        }]
+    );
 }
 
 #[derive(Component, Serialize, Deserialize)]

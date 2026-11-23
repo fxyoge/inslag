@@ -1,4 +1,4 @@
-use super::{Backend, Error, Pending, SaveBundle, SaveHandle, SaveStats, StoredSave};
+use super::{Backend, Error, Pending, SaveBundle, SaveHandle, SaveInfo, SaveStats, StoredSave};
 use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use std::{
     collections::BTreeMap,
@@ -7,11 +7,11 @@ use std::{
     path::{Path, PathBuf},
     sync::{Mutex, mpsc},
     thread,
-    time::Duration,
+    time::{Duration, UNIX_EPOCH},
 };
 
 const APPLICATION_ID: i64 = 0x4749_4741;
-const FORMAT: i64 = 1;
+const FORMAT: i64 = 2;
 
 impl From<rusqlite::Error> for Error {
     fn from(error: rusqlite::Error) -> Self {
@@ -92,7 +92,7 @@ impl Backend for Sqlite {
         self.submit(move |collection| collection.database(handle).read())
     }
 
-    fn list(&self) -> Result<Pending<Vec<SaveHandle>>, Error> {
+    fn list(&self) -> Result<Pending<Vec<SaveInfo>>, Error> {
         self.submit(|collection| list(&collection.directory))
     }
 }
@@ -116,7 +116,7 @@ impl Collection {
     }
 }
 
-fn list(directory: &Path) -> Result<Vec<SaveHandle>, Error> {
+fn list(directory: &Path) -> Result<Vec<SaveInfo>, Error> {
     let files = match fs::read_dir(directory) {
         Ok(files) => files,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
@@ -148,12 +148,23 @@ fn list(directory: &Path) -> Result<Vec<SaveHandle>, Error> {
         }
         check_format(&transaction, application)?;
         if generation(&transaction)? != 0 {
-            saves.push(SaveHandle(
-                u128::from_str_radix(stem, 16).expect("validated handle"),
-            ));
+            let millis: i64 = transaction.query_row(
+                "SELECT created_at_ms FROM meta WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )?;
+            let millis = u64::try_from(millis)
+                .map_err(|_| Error::InvalidData("negative creation timestamp".into()))?;
+            let created_at = UNIX_EPOCH
+                .checked_add(Duration::from_millis(millis))
+                .ok_or_else(|| Error::InvalidData("creation timestamp out of range".into()))?;
+            saves.push(SaveInfo {
+                handle: SaveHandle(u128::from_str_radix(stem, 16).expect("validated handle")),
+                created_at,
+            });
         }
     }
-    saves.sort_unstable();
+    saves.sort_unstable_by_key(|save| save.handle);
     Ok(saves)
 }
 
@@ -189,12 +200,12 @@ impl Database {
                     connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
                 transaction.execute_batch(
                     "PRAGMA application_id = 1195984705;
-                     PRAGMA user_version = 1;
                      CREATE TABLE meta (
                          singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-                         generation INTEGER NOT NULL CHECK(generation >= 0)
+                         generation INTEGER NOT NULL CHECK(generation >= 0),
+                         created_at_ms INTEGER NOT NULL CHECK(created_at_ms >= 0)
                      ) STRICT;
-                     INSERT INTO meta VALUES (1, 0);
+                     INSERT INTO meta VALUES (1, 0, 0);
                      CREATE TABLE types (
                          key TEXT PRIMARY KEY, kind INTEGER NOT NULL CHECK(kind IN (0, 1))
                      ) STRICT;
@@ -215,6 +226,7 @@ impl Database {
                      ) STRICT;
                      CREATE INDEX entity_refs_target ON entity_refs(target);"
                 )?;
+                transaction.pragma_update(None, "user_version", FORMAT)?;
                 transaction.commit()?;
             } else {
                 check_format(&connection, application)?;
@@ -305,7 +317,11 @@ impl Database {
             }
         }
         transaction.execute(
-            "UPDATE meta SET generation = ?1 WHERE singleton = 1",
+            "UPDATE meta SET generation = ?1,
+                created_at_ms = CASE WHEN generation = 0
+                    THEN CAST(round(unixepoch('subsec') * 1000) AS INTEGER)
+                    ELSE created_at_ms END
+             WHERE singleton = 1",
             [next],
         )?;
         transaction.commit()?;
