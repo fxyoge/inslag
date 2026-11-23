@@ -107,7 +107,7 @@ mod input;
 mod platform;
 
 use bevy::prelude::*;
-use mlua::{Function, Lua, LuaSerdeExt, Table, ThreadStatus, Value, VmState};
+use mlua::{Function, Lua, LuaSerdeExt, Table, Value, VmState};
 use serde::{Deserialize, Serialize};
 use std::{
     cell::Cell,
@@ -510,7 +510,7 @@ impl Runner {
         interrupts.set(0);
         let mut yielded: Value = thread.resume(arguments).map_err(err)?;
         let mut immediate = 0;
-        while thread.status() != ThreadStatus::Finished {
+        while !thread.is_finished() {
             self.check_limits()?;
             let request = yielded.as_table().ok_or("unsupported coroutine yield")?;
             let operation: String = request.get("operation").map_err(err)?;
@@ -575,7 +575,7 @@ impl Runner {
                     "load_error": status.load().and_then(|result| result.as_ref().err()),
                     "save_error": status.last_save().and_then(|result| result.as_ref().err()),
                     "generation": status.last_save().and_then(|result| result.as_ref().ok()).map(|stats| stats.generation),
-                }), mlua::SerializeOptions::new().serialize_none_to_null(false).serialize_unit_to_null(false)).map_err(err)
+                }), mlua::serde::SerializeOptions::new().serialize_none_to_null(false).serialize_unit_to_null(false)).map_err(err)
             }
             "step" => {
                 let count: u64 = args.get("count").map_err(err)?;
