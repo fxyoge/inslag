@@ -269,9 +269,9 @@ pub(super) fn parse_node(
                     return Err(error(reader, source, format!("duplicate fill `{name}`")));
                 }
             }
-            Event::End(end) if end.name().as_ref() == b"use" => break,
+            Event::End(end) if end.name().into_inner() == "use" => break,
             Event::Comment(_) => {}
-            Event::Text(text) if text.decode().is_ok_and(|s| s.trim().is_empty()) => {}
+            Event::Text(text) if text.trim().is_empty() => {}
             _ => return Err(error(reader, source, "invalid or unclosed use")),
         }
     }
