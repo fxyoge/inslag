@@ -1,0 +1,11 @@
+warning: calling a system registration helper in Plugin::build hides system registration
+  --> $DIR/nested_bodies.rs:24:9
+   |
+LL |         setup(app);
+   |         ^^^^^^^^^^
+   |
+   = help: move the `add_systems` calls into `Plugin::build`
+   = note: `#[warn(bevy_indirect_system_registration)]` on by default
+
+warning: 1 warning emitted
+

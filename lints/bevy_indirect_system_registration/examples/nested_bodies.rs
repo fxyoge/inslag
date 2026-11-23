@@ -17,7 +17,7 @@ impl Plugin for GamePlugin {
         app.add_systems(Update, || {
             let _ = configurations();
         });
-        // A nested helper body is not inspected transitively either.
+        // Report the setup call, not the factory inside it.
         fn setup(app: &mut App) {
             app.add_systems(Update, configurations());
         }

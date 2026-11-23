@@ -3,7 +3,7 @@ name = "bevy_indirect_system_registration"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-description = "Detect configuration-producing helper calls in Bevy Plugin::build"
+description = "Detect helpers that hide system registration in Bevy Plugin::build"
 
 [lib]
 crate-type = ["cdylib"]

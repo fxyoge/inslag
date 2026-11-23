@@ -1,4 +1,5 @@
 use super::*;
+use crate::spawn_activity::{self, SpawnActivity, SpawnRuns};
 
 /// Installs the application-wide state-tree runtime into a Bevy schedule.
 ///
@@ -94,7 +95,20 @@ impl Plugin for StateTreePlugin {
                 ),
             );
 
-        crate::spawn_activity::register(app, self.schedule);
+        crate::activity::register_activity::<SpawnActivity>(
+            app.world_mut(),
+            crate::Activity::new(spawn_activity::NAME).with_lifecycle(),
+            crate::protocol::RegistrationOrigin::BuiltIn,
+        );
+        app.init_resource::<SpawnRuns>().add_systems(
+            self.schedule,
+            (
+                spawn_activity::handle_lifecycle,
+                spawn_activity::monitor_runs,
+            )
+                .chain()
+                .in_set(StateTreeSet::HandleActivities),
+        );
         crate::binding::install_pending(app.world_mut());
         app.add_systems(
             bevy_app::First,

@@ -6,18 +6,23 @@ extern crate rustc_lint;
 extern crate rustc_middle;
 extern crate rustc_session;
 
+use std::ops::ControlFlow;
+
 use rustc_errors::DiagDecorator;
-use rustc_hir::{Expr, ExprKind, def_id::DefId};
+use rustc_hir::{
+    Expr, ExprKind, Mutability,
+    def::DefKind,
+    def_id::DefId,
+    intravisit::{self, Visitor},
+};
 use rustc_lint::{LateContext, LateLintPass, LintContext};
-use rustc_middle::ty::{self, Ty};
+use rustc_middle::ty::{self, Ty, TypeckResults};
 
 rustc_session::declare_lint! {
-    /// Rejects configuration-producing helper calls inside Bevy Plugin::build.
-    /// Keep system composition visible at its registration site instead.
-    /// App-mutating setup helpers and system-set configurations are outside this rule.
+    /// Keep system registration visible in Bevy Plugin::build.
     pub BEVY_INDIRECT_SYSTEM_REGISTRATION,
     Warn,
-    "configuration-producing helper calls in Plugin::build hide system registration"
+    "helper calls in Plugin::build hide system registration"
 }
 
 rustc_session::declare_lint_pass!(BevyIndirectSystemRegistration => [BEVY_INDIRECT_SYSTEM_REGISTRATION]);
@@ -32,7 +37,9 @@ pub fn register_lints(_: &rustc_session::Session, store: &mut rustc_lint::LintSt
 
 impl<'tcx> LateLintPass<'tcx> for BevyIndirectSystemRegistration {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
-        if expr.span.from_expansion() {
+        if expr.span.from_expansion()
+            || !matches!(expr.kind, ExprKind::Call(..) | ExprKind::MethodCall(..))
+        {
             return;
         }
 
@@ -51,38 +58,106 @@ impl<'tcx> LateLintPass<'tcx> for BevyIndirectSystemRegistration {
             return;
         }
 
-        let callee = match expr.kind {
-            ExprKind::Call(callee, _) => match cx.typeck_results().expr_ty(callee).kind() {
-                ty::FnDef(def_id, _) => Some(*def_id),
-                // Function pointers still hide configuration production, even without
-                // a statically known definition.
-                ty::FnPtr(..) => None,
-                _ => return,
-            },
-            ExprKind::MethodCall(..) => cx.typeck_results().type_dependent_def_id(expr.hir_id),
-            _ => return,
-        };
+        let typeck = cx.typeck_results();
+        let callee = called_function(typeck, expr);
+        // Function pointers can hide configuration production without a known body.
+        if callee.is_none()
+            && !matches!(expr.kind, ExprKind::Call(target, _) if matches!(typeck.expr_ty(target).kind(), ty::FnPtr(..)))
+        {
+            return;
+        }
         // Bevy's configuration combinators (chain, in_set, run_if, etc.) are
         // composition at the registration site, not user-authored factories.
         if callee.is_some_and(|id| cx.tcx.crate_name(id.krate).as_str() == "bevy_ecs") {
             return;
         }
 
-        let output = cx.typeck_results().expr_ty(expr);
-        if is_system_configuration(cx, output) {
-            cx.emit_span_lint(
-                BEVY_INDIRECT_SYSTEM_REGISTRATION,
-                expr.span,
-                DiagDecorator(|diag| {
-                    diag.primary_message(
-                        "calling a system configuration helper in Plugin::build hides system registration",
-                    );
-                    diag.help(
-                        "move the system tuple and its configuration into the registration site",
-                    );
-                }),
-            );
+        let (message, help) = if is_system_configuration(cx, typeck.expr_ty(expr)) {
+            (
+                "calling a system configuration helper in Plugin::build hides system registration",
+                "move the system tuple and its configuration into the registration site",
+            )
+        } else if callee.is_some_and(|id| registers_app_systems(cx, id)) {
+            (
+                "calling a system registration helper in Plugin::build hides system registration",
+                "move the `add_systems` calls into `Plugin::build`",
+            )
+        } else {
+            return;
+        };
+        cx.emit_span_lint(
+            BEVY_INDIRECT_SYSTEM_REGISTRATION,
+            expr.span,
+            DiagDecorator(|diag| {
+                diag.primary_message(message);
+                diag.help(help);
+            }),
+        );
+    }
+}
+
+fn called_function(typeck: &TypeckResults<'_>, expr: &Expr<'_>) -> Option<DefId> {
+    match expr.kind {
+        ExprKind::Call(target, _) => match typeck.expr_ty(target).kind() {
+            ty::FnDef(id, _) => Some(*id),
+            _ => None,
+        },
+        ExprKind::MethodCall(..) => typeck.type_dependent_def_id(expr.hir_id),
+        _ => None,
+    }
+}
+
+fn is_app(cx: &LateContext<'_>, ty: Ty<'_>) -> bool {
+    matches!(ty.kind(), ty::Adt(adt, _)
+        if definition(cx, adt.did().krate, "bevy_app", &["App"]) == Some(adt.did()))
+}
+
+fn registers_app_systems(cx: &LateContext<'_>, id: DefId) -> bool {
+    let Some(local) = id.as_local() else {
+        return false;
+    };
+    // A trait default body may not be the implementation the call invokes.
+    if cx.tcx.def_kind(cx.tcx.parent(id)) == DefKind::Trait {
+        return false;
+    }
+    let Some(body) = cx.tcx.hir_maybe_body_owned_by(local) else {
+        return false;
+    };
+    let typeck = cx.tcx.typeck(local);
+    body.params.iter().any(|param| {
+        matches!(typeck.node_type(param.pat.hir_id).kind(),
+            ty::Ref(_, inner, Mutability::Mut) if is_app(cx, *inner))
+    }) && FindAppRegistration { cx, typeck }
+        .visit_expr(body.value)
+        .is_break()
+}
+
+struct FindAppRegistration<'a, 'tcx> {
+    cx: &'a LateContext<'tcx>,
+    typeck: &'tcx TypeckResults<'tcx>,
+}
+
+impl<'tcx> Visitor<'tcx> for FindAppRegistration<'_, 'tcx> {
+    type Result = ControlFlow<()>;
+
+    fn visit_expr(&mut self, expr: &'tcx Expr<'tcx>) -> Self::Result {
+        let cx = self.cx;
+        if called_function(self.typeck, expr).is_some_and(|id| {
+            cx.tcx.crate_name(id.krate).as_str() == "bevy_app"
+                && cx.tcx.item_name(id).as_str() == "add_systems"
+                && cx.tcx.impl_of_assoc(id).is_some_and(|implementation| {
+                    is_app(
+                        cx,
+                        cx.tcx
+                            .type_of(implementation)
+                            .instantiate_identity()
+                            .skip_norm_wip(),
+                    )
+                })
+        }) {
+            return ControlFlow::Break(());
         }
+        intravisit::walk_expr(self, expr)
     }
 }
 
@@ -191,6 +266,7 @@ mod tests {
         nested_factory,
         local_factory,
         function_pointer_factory,
+        app_setup,
         outside_plugin,
         inline_configuration,
         system_set_factory,

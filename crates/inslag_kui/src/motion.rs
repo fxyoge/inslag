@@ -1,3 +1,6 @@
+mod plugins;
+pub(crate) use plugins::KuiMotionPlugin;
+
 use bevy::prelude::*;
 use bevy_flair::{
     core::{
@@ -6,10 +9,9 @@ use bevy_flair::{
     },
     parser::{ReflectParseCss, parse_property_value_with},
     prelude::{AnimationProgress, ComponentProperties, StyleProperties},
-    style::StyleSystems,
 };
 
-use crate::{KuiComponentInstance, KuiSystems, KuiViewRoot};
+use crate::{KuiComponentInstance, KuiViewRoot};
 
 #[derive(Reflect, Clone, Debug, Default, PartialEq)]
 #[reflect(Clone, Debug, Default, PartialEq)]
@@ -50,7 +52,7 @@ struct LayoutOrigin {
     written: UiTransform,
 }
 
-pub(crate) fn install(app: &mut App) {
+fn register_properties(app: &mut App) {
     // Asset-only/headless KUI remains usable without Flair.
     if !app.world().contains_resource::<CssPropertyRegistry>()
         || app.world().contains_resource::<MotionProperties>()
@@ -92,27 +94,7 @@ pub(crate) fn install(app: &mut App) {
             .resolve(MotionStyle::property_field_ref("progress"))
             .unwrap(),
     };
-    app.insert_resource(ids)
-        .add_systems(
-            Update,
-            restore_world
-                .in_set(RestorePresentation)
-                .before(KuiSystems::Prepare),
-        )
-        .add_systems(PostUpdate, restore_layout.before(StyleSystems::Prepare))
-        .add_systems(
-            PostUpdate,
-            connect_timelines
-                .after(StyleSystems::ResolveAnimations)
-                .before(StyleSystems::SetAnimationValues),
-        )
-        .add_systems(
-            PostUpdate,
-            (apply_world, apply_layout_origin)
-                .after(StyleSystems::ApplyComputedProperties)
-                .before(bevy::ui::UiSystems::Content)
-                .before(bevy::transform::TransformSystems::Propagate),
-        );
+    app.insert_resource(ids);
 }
 
 fn connect_timelines(

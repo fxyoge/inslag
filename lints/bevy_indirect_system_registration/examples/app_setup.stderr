@@ -1,0 +1,19 @@
+warning: calling a system registration helper in Plugin::build hides system registration
+  --> $DIR/app_setup.rs:50:9
+   |
+LL |         lifecycle::install(app, true);
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: move the `add_systems` calls into `Plugin::build`
+   = note: `#[warn(bevy_indirect_system_registration)]` on by default
+
+warning: calling a system registration helper in Plugin::build hides system registration
+  --> $DIR/app_setup.rs:51:9
+   |
+LL |         self.install(app);
+   |         ^^^^^^^^^^^^^^^^^
+   |
+   = help: move the `add_systems` calls into `Plugin::build`
+
+warning: 2 warnings emitted
+

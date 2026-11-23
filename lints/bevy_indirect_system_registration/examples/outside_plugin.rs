@@ -16,10 +16,9 @@ fn setup(app: &mut App) {
 
 struct GamePlugin;
 impl Plugin for GamePlugin {
-    fn build(&self, app: &mut App) {
-        setup(app);
-    }
+    fn build(&self, _: &mut App) {}
     fn finish(&self, app: &mut App) {
+        setup(app);
         app.add_systems(Update, configurations());
     }
 }

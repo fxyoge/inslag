@@ -2,15 +2,16 @@
 
 ### What it does
 
-Checks for helper calls that return system configurations inside Bevy's `Plugin::build`. This includes:
+Checks for helper calls that hide system registration inside Bevy's `Plugin::build`. This includes:
 
 - Functions and methods returning `ScheduleConfigs<ScheduleSystem>`, including type aliases.
 - Helpers returning `impl IntoScheduleConfigs<ScheduleSystem, M>`, including generic helpers.
-- Calls through function pointers.
+- System configuration factories called through function pointers.
 - Helper calls nested in system tuples or chained configurations.
 - Helper results assigned to local variables before registration.
+- Local functions and methods taking `&mut App` and calling `App::add_systems`.
 
-Bevy's configuration methods (`chain`, `in_set`, `run_if`, etc.), system-set configurations, and helpers that mutate the `App` without returning system configurations are not flagged.
+Bevy's configuration methods (`chain`, `in_set`, `run_if`, etc.), system-set configurations, and setup helpers that don't register systems are not flagged.
 
 ### Why is this bad?
 

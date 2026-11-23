@@ -1,4 +1,10 @@
+use bevy_app::{Last, PreStartup};
+use bevy_time::{Real, Time};
+
 use super::*;
+use crate::lifecycle::{
+    CheckReadiness, SaveSession, has_work, initial_load, process, update_interval,
+};
 
 #[derive(Default)]
 pub struct SavePlugin {
@@ -46,7 +52,7 @@ impl SavePlugin {
     ) -> Self {
         self.readiness = Some(Box::new(move |app| {
             app.add_systems(
-                lifecycle::CheckReadiness,
+                CheckReadiness,
                 condition.clone().pipe(lifecycle::set_enabled),
             );
         }));
@@ -63,7 +69,37 @@ impl Plugin for SavePlugin {
         if self.path.is_none() {
             app.world_mut().resource_mut::<storage::Storage>().close();
         }
-        lifecycle::install(app, self.load_on_start, self.interval);
+        assert!(
+            self.interval.is_none() || app.world().contains_resource::<Time<Real>>(),
+            "autosave requires TimePlugin before SavePlugin"
+        );
+        app.init_schedule(PrepareSave)
+            .init_schedule(SaveOpened)
+            .init_schedule(SaveClosed)
+            .init_schedule(CheckReadiness)
+            .configure_sets(SaveOpened, (SaveSet::Rebuild, SaveSet::Ready).chain())
+            .configure_sets(SaveClosed, (SaveSet::Rebuild, SaveSet::Ready).chain())
+            .add_message::<SaveRequest>()
+            .init_resource::<SaveSettings>()
+            .insert_resource(SaveSession::default())
+            .add_systems(PreStartup, registration::initialize.before(SaveSet::Load))
+            .add_systems(
+                Last,
+                (
+                    update_interval,
+                    process.run_if(has_work.or_eager(on_message::<SaveRequest>)),
+                )
+                    .chain()
+                    .in_set(SaveSet::Save),
+            );
+        if self.interval.is_some() {
+            app.insert_resource(SaveSettings {
+                interval: self.interval,
+            });
+        }
+        if self.load_on_start {
+            app.add_systems(PreStartup, initial_load.in_set(SaveSet::Load));
+        }
         app.persist(component::<bevy_ecs::name::Name>("bevy.name").attached())
             .persist(
                 component::<bevy_transform::components::Transform>("bevy.transform").attached(),

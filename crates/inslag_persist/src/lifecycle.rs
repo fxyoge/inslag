@@ -1,13 +1,12 @@
 use crate::{
     Error, LoadOutcome, SaveStats,
-    registration::{self, Registry},
+    registration::Registry,
     storage::{self, Storage},
 };
-use bevy_app::{App, Last, PreStartup};
 use bevy_ecs::{
     message::MessageCursor,
     prelude::*,
-    schedule::{ScheduleLabel, SystemSet, common_conditions::on_message},
+    schedule::{ScheduleLabel, SystemSet},
 };
 use bevy_time::{Real, Time};
 use std::{
@@ -94,52 +93,26 @@ pub(crate) struct SaveSession {
     enabled: bool,
 }
 
-impl SaveSession {
-    fn is_busy(&self) -> bool {
-        self.running || self.opening.is_some() || self.prepared.is_some()
-    }
-}
-
-pub(crate) fn install(app: &mut App, load_on_start: bool, interval: Option<Duration>) {
-    assert!(
-        interval.is_none() || app.world().contains_resource::<Time<Real>>(),
-        "autosave requires TimePlugin before SavePlugin"
-    );
-    app.init_schedule(PrepareSave)
-        .init_schedule(SaveOpened)
-        .init_schedule(SaveClosed)
-        .init_schedule(CheckReadiness)
-        .configure_sets(SaveOpened, (SaveSet::Rebuild, SaveSet::Ready).chain())
-        .configure_sets(SaveClosed, (SaveSet::Rebuild, SaveSet::Ready).chain())
-        .add_message::<SaveRequest>()
-        .init_resource::<SaveSettings>()
-        .insert_resource(SaveSession {
+impl Default for SaveSession {
+    fn default() -> Self {
+        Self {
             opening: None,
             prepared: None,
             running: false,
             deadline: Duration::MAX,
             interval: None,
             enabled: true,
-        })
-        .add_systems(PreStartup, registration::initialize.before(SaveSet::Load))
-        .add_systems(
-            Last,
-            (
-                update_interval,
-                process.run_if(has_work.or_eager(on_message::<SaveRequest>)),
-            )
-                .chain()
-                .in_set(SaveSet::Save),
-        );
-    if interval.is_some() {
-        app.insert_resource(SaveSettings { interval });
-    }
-    if load_on_start {
-        app.add_systems(PreStartup, initial_load.in_set(SaveSet::Load));
+        }
     }
 }
 
-fn initial_load(world: &mut World) {
+impl SaveSession {
+    fn is_busy(&self) -> bool {
+        self.running || self.opening.is_some() || self.prepared.is_some()
+    }
+}
+
+pub(crate) fn initial_load(world: &mut World) {
     if !world.resource::<Registry>().started
         && let Some(path) = world.resource::<SaveStatus>().path.clone()
     {
@@ -170,7 +143,7 @@ fn run_active<T>(world: &mut World, operation: impl FnOnce(&mut World) -> T) -> 
 pub(crate) fn set_enabled(In(enabled): In<bool>, mut session: ResMut<SaveSession>) {
     session.enabled = enabled;
 }
-fn update_interval(
+pub(crate) fn update_interval(
     mut session: ResMut<SaveSession>,
     settings: Res<SaveSettings>,
     time: Option<Res<Time<Real>>>,
@@ -191,7 +164,7 @@ fn update_interval(
             .map_or(Duration::MAX, |interval| now.saturating_add(interval));
     }
 }
-fn has_work(
+pub(crate) fn has_work(
     session: Res<SaveSession>,
     status: Res<SaveStatus>,
     time: Option<Res<Time<Real>>>,
@@ -199,7 +172,7 @@ fn has_work(
     let now = time.as_ref().map_or(Duration::ZERO, |time| time.elapsed());
     session.is_busy() || (status.writable && now >= session.deadline)
 }
-fn process(world: &mut World, mut cursor: Local<MessageCursor<SaveRequest>>) {
+pub(crate) fn process(world: &mut World, mut cursor: Local<MessageCursor<SaveRequest>>) {
     let messages = world.resource::<Messages<SaveRequest>>();
     let mut requests = cursor.read(messages);
     let request = if world.resource::<SaveSession>().is_busy() {

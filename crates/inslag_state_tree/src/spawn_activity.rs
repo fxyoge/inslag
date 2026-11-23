@@ -1,27 +1,25 @@
 use std::collections::HashMap;
 
-use bevy_app::App;
 use bevy_asset::{AssetLoadFailedEvent, AssetPath, AssetServer, Assets, Handle};
 use bevy_ecs::{
     entity::Entity,
     message::MessageReader,
     prelude::{Commands, Query, Res, ResMut, Resource},
-    schedule::{InternedScheduleLabel, IntoScheduleConfigs},
 };
 
 use crate::{
     InstanceStatus, LuauValue, StateTreeActivity, StateTreeActivityLifecycle,
     StateTreeActivityOutcomeWriter, StateTreeActivityToken, StateTreeDefinition, StateTreeInstance,
-    StateTreeLinkFailure, StateTreeSet,
+    StateTreeLinkFailure,
 };
 
-const NAME: &str = "ist.spawn";
+pub(crate) const NAME: &str = "ist.spawn";
 
 #[derive(bevy_ecs::prelude::Component)]
 pub(crate) struct SpawnedStateTree;
 
 #[derive(crate::StateTreeInput)]
-struct SpawnActivity {
+pub(crate) struct SpawnActivity {
     definition: String,
 }
 
@@ -46,25 +44,11 @@ struct SpawnRun {
 }
 
 #[derive(Resource, Default)]
-struct SpawnRuns {
+pub(crate) struct SpawnRuns {
     runs: Vec<SpawnRun>,
 }
 
-pub(crate) fn register(app: &mut App, schedule: InternedScheduleLabel) {
-    crate::activity::register_activity::<SpawnActivity>(
-        app.world_mut(),
-        crate::Activity::new(NAME).with_lifecycle(),
-        crate::protocol::RegistrationOrigin::BuiltIn,
-    );
-    app.init_resource::<SpawnRuns>().add_systems(
-        schedule,
-        (handle_lifecycle, monitor_runs)
-            .chain()
-            .in_set(StateTreeSet::HandleActivities),
-    );
-}
-
-fn handle_lifecycle(
+pub(crate) fn handle_lifecycle(
     mut lifecycle: MessageReader<StateTreeActivityLifecycle<SpawnActivity>>,
     asset_server: Res<AssetServer>,
     mut runs: ResMut<SpawnRuns>,
@@ -114,7 +98,7 @@ fn handle_lifecycle(
     }
 }
 
-fn monitor_runs(
+pub(crate) fn monitor_runs(
     mut commands: Commands,
     definitions: Res<Assets<StateTreeDefinition>>,
     #[cfg(feature = "persistence")] asset_server: Res<AssetServer>,

@@ -1,3 +1,6 @@
+mod plugins;
+pub(crate) use plugins::KuiInteractionPlugin;
+
 use std::collections::HashMap;
 
 use bevy::{
@@ -12,7 +15,7 @@ use bevy::{
     window::{CursorIcon, PrimaryWindow, SystemCursorIcon},
 };
 
-use crate::{KuiAction, KuiSystems, KuiView, KuiViewStatus, runtime::ActionBindings};
+use crate::{KuiAction, KuiView, KuiViewStatus, runtime::ActionBindings};
 
 /// Geometry shared by click, hover, press/release and drag actions.
 /// Positions are in the receiving element's parent coordinates. `start` is the
@@ -64,29 +67,6 @@ struct Hovers(HashMap<(Entity, PointerId), Hover>);
 struct Hover {
     data: KuiActionData,
     exit: Option<KuiAction>,
-}
-
-pub(crate) fn install(app: &mut App) {
-    app.init_resource::<Drags>()
-        .init_resource::<Hovers>()
-        .add_observer(click)
-        .add_observer(press)
-        .add_observer(release)
-        .add_observer(drag_start)
-        .add_observer(drag_move)
-        .add_observer(drag_end)
-        .add_observer(cancel)
-        .add_systems(
-            Update,
-            (cancel_unavailable, hover, cursor)
-                .chain()
-                .in_set(KuiSystems::Input)
-                .before(KuiSystems::Prepare),
-        )
-        .add_systems(
-            PreUpdate,
-            text_hits.in_set(bevy::picking::PickingSystems::Backend),
-        );
 }
 
 #[derive(SystemParam)]
