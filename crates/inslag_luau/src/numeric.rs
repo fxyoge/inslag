@@ -223,10 +223,11 @@ fn compile(
         }
         Expression::FunctionCall(call) => {
             let mut suffixes: Vec<_> = call.suffixes().collect();
-            let Some(Suffix::Call(full_moon::ast::Call::AnonymousCall(
-                FunctionArgs::Parentheses { arguments, .. },
-            ))) = suffixes.pop()
+            let Some(Suffix::Call(full_moon::ast::Call::AnonymousCall(args))) = suffixes.pop()
             else {
+                return Err("numeric formulas support only pure math calls".into());
+            };
+            let FunctionArgs::Parentheses { arguments, .. } = args.as_ref() else {
                 return Err("numeric formulas support only pure math calls".into());
             };
             let path = static_path(call.prefix(), suffixes.into_iter())?;
