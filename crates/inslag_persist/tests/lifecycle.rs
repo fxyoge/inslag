@@ -390,13 +390,16 @@ fn list_returns_creation_metadata_and_ignores_unfinished_databases() {
     let unfinished = directory
         .path()
         .join("00000000000000000000000000000000.sqlite");
+    let saved = Connection::open(only_file(directory.path())).unwrap();
     let connection = Connection::open(unfinished).unwrap();
+    for pragma in ["application_id", "user_version"] {
+        let value: i64 = saved
+            .pragma_query_value(None, pragma, |row| row.get(0))
+            .unwrap();
+        connection.pragma_update(None, pragma, value).unwrap();
+    }
     connection
-        .execute_batch(
-            "PRAGMA application_id = 1195984705; PRAGMA user_version = 2;
-         CREATE TABLE meta (singleton INTEGER PRIMARY KEY, generation INTEGER, created_at_ms INTEGER);
-         INSERT INTO meta VALUES (1, 0, 0);",
-        )
+        .execute_batch(include_str!("../sqlite/migrations/0001_initial.up.sql"))
         .unwrap();
     std::fs::write(directory.path().join("notes.txt"), b"not a save").unwrap();
     let mut reader = app(directory.path());

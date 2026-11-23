@@ -2,7 +2,11 @@
 //!
 //! Implement [`SaveAdapter`] and call [`register`] before the first save or load.
 //! For ordinary Bevy components and resources, use [`crate::save`] instead.
-use crate::{AppSaveExt, Error, registration::*};
+use crate::{
+    AppSaveExt, Error,
+    backend::{Batch, Record, RecordOwner},
+    registration::*,
+};
 use bevy_app::App;
 use bevy_ecs::{entity::EntityHashMap, prelude::*};
 use std::{
@@ -91,7 +95,7 @@ impl<A: SaveAdapter> Codec for AdapterCodec<A> {
         let (captured, references) = crate::entity::references(|| self.adapter.capture(world));
         let captured = captured?;
         batch.upserts.push(Record {
-            id: 0,
+            owner: RecordOwner::GLOBAL,
             key: self.key,
             payload: captured.bytes,
             references,
@@ -101,9 +105,9 @@ impl<A: SaveAdapter> Codec for AdapterCodec<A> {
     fn decode(
         &self,
         world: &mut World,
-        records: &[(i64, Vec<u8>)],
+        records: &[(RecordOwner, Vec<u8>)],
     ) -> Result<Box<dyn Decoded>, Error> {
-        if records.len() != 1 || records[0].0 != 0 {
+        if records.len() != 1 || records[0].0 != RecordOwner::GLOBAL {
             return Err(Error::InvalidData(format!(
                 "missing or invalid adapter {}",
                 self.key

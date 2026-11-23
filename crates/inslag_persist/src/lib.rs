@@ -58,6 +58,7 @@ mod plugins;
 pub use plugins::SavePlugin;
 
 pub mod adapter;
+mod backend;
 mod identity;
 mod lifecycle;
 mod registration;

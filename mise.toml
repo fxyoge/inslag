@@ -14,6 +14,10 @@ components = ["clippy", "rustfmt"]
 [task_templates.dylint-link]
 tools."cargo:dylint-link" = "6.3.2"
 
+[task_templates.persist-sql]
+dir = "crates/inslag_persist"
+tools."github:sqlc-dev/sqlc" = "1.31.1"
+
 [tasks.bench]
 description = "Run the Rust benchmarks"
 run = [
@@ -60,6 +64,7 @@ run = "cargo fuzz run parse"
 description = "Run formatting, Clippy, and Dylint checks"
 run = [
   { task = "lint:fmt" },
+  { task = "lint:persist-sql" },
   { task = "lint:clippy" },
   { task = "lint:clippy", args = [
     "--all-features",
@@ -71,6 +76,16 @@ run = [
 [tasks."lint:fmt"]
 hide = true
 run = "cargo fmt --all --check"
+
+[tasks."generate:persist-sql"]
+description = "Generate Rust bindings for inslag_persist SQLite queries"
+extends = "persist-sql"
+run = "bash tools/sqlc.sh"
+
+[tasks."lint:persist-sql"]
+hide = true
+extends = "persist-sql"
+run = "bash tools/sqlc.sh --check"
 
 [tasks."lint:clippy"]
 hide = true

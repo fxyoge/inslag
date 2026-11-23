@@ -1,4 +1,9 @@
-use crate::{Error, entity, identity::Identities};
+use crate::{
+    Error,
+    backend::{Batch, Record, RecordOwner, Role},
+    entity,
+    identity::Identities,
+};
 use bevy_app::App;
 use bevy_ecs::{
     change_detection::{DetectChanges, MAX_CHANGE_AGE, Tick},
@@ -89,7 +94,7 @@ fn resource<T: Resource + FromWorld + Serialize + DeserializeOwned>(
 
 pub struct Registration {
     key: &'static str,
-    kind: i64,
+    role: Role,
     type_id: TypeId,
     pub(crate) setup: Setup,
 }
@@ -98,7 +103,7 @@ impl Registration {
     pub(crate) fn new_adapter(key: &'static str, type_id: TypeId, setup: Setup) -> Self {
         Self {
             key,
-            kind: 0,
+            role: Role::Global,
             type_id,
             setup,
         }
@@ -170,8 +175,8 @@ impl AppSaveExt for App {
             registry
                 .entries
                 .iter()
-                .all(|entry| (entry.type_id, entry.kind)
-                    != (registration.type_id, registration.kind)),
+                .all(|entry| (entry.type_id, entry.role)
+                    != (registration.type_id, registration.role)),
             "a type can only be persisted once per component/resource role"
         );
         let codec = (registration.setup)(self.world_mut());
@@ -180,7 +185,7 @@ impl AppSaveExt for App {
             .entries
             .push(Entry {
                 key: registration.key,
-                kind: registration.kind,
+                role: registration.role,
                 type_id: registration.type_id,
                 codec,
             });
@@ -263,22 +268,9 @@ pub(crate) struct Registry {
 
 pub(crate) struct Entry {
     pub key: &'static str,
-    pub kind: i64,
+    pub role: Role,
     type_id: TypeId,
     pub codec: Box<dyn Codec>,
-}
-
-pub(crate) struct Record {
-    pub id: i64,
-    pub key: &'static str,
-    pub payload: Vec<u8>,
-    pub references: Vec<i64>,
-}
-
-#[derive(Default)]
-pub(crate) struct Batch {
-    pub upserts: Vec<Record>,
-    pub deletes: Vec<(i64, &'static str)>,
 }
 
 pub(crate) trait Codec: Send + Sync {
@@ -297,7 +289,7 @@ pub(crate) trait Codec: Send + Sync {
     fn decode(
         &self,
         world: &mut World,
-        records: &[(i64, Vec<u8>)],
+        records: &[(RecordOwner, Vec<u8>)],
     ) -> Result<Box<dyn Decoded>, Error>;
     fn decode_missing(&self, world: &mut World) -> Result<Box<dyn Decoded>, Error> {
         self.decode(world, &[])
@@ -343,7 +335,7 @@ where
     fn from(value: ComponentSave<T, F>) -> Self {
         Self {
             key: value.key,
-            kind: 1,
+            role: Role::Component,
             type_id: TypeId::of::<T>(),
             setup: Box::new(move |world| {
                 let filtered = TypeId::of::<F>() != TypeId::of::<()>();
@@ -434,7 +426,7 @@ where
             source,
         })?;
         batch.upserts.push(Record {
-            id,
+            owner: RecordOwner::entity(id),
             key: self.key,
             payload,
             references,
@@ -484,7 +476,7 @@ where
                         .filter(|(entity, _)| {
                             !ids.removed.contains(entity) || world.get::<T>(*entity).is_none()
                         })
-                        .map(|&(_, id)| (id, self.key)),
+                        .map(|&(_, id)| (RecordOwner::entity(id), self.key)),
                 );
             } else {
                 let tracking = world.resource::<Tracking<T>>();
@@ -494,7 +486,9 @@ where
                     .filter(|entity| world.get::<T>(**entity).is_none())
                 {
                     if let Some(identity) = ids.entries.get(entity) {
-                        batch.deletes.push((identity.id, self.key));
+                        batch
+                            .deletes
+                            .push((RecordOwner::entity(identity.id), self.key));
                     }
                 }
             }
@@ -536,7 +530,9 @@ where
             .filter(|entity| !tracking.members.contains(entity))
         {
             if let Some(identity) = ids.entries.get(entity) {
-                batch.deletes.push((identity.id, self.key));
+                batch
+                    .deletes
+                    .push((RecordOwner::entity(identity.id), self.key));
             }
         }
         Ok(None)
@@ -545,14 +541,14 @@ where
     fn decode(
         &self,
         _world: &mut World,
-        records: &[(i64, Vec<u8>)],
+        records: &[(RecordOwner, Vec<u8>)],
     ) -> Result<Box<dyn Decoded>, Error> {
         let values = records
             .iter()
-            .map(|&(id, ref payload)| {
-                if id <= 0 {
-                    return Err(Error::InvalidData("component stored as a resource".into()));
-                }
+            .map(|(owner, payload)| {
+                let id = owner
+                    .entity_id()
+                    .ok_or_else(|| Error::InvalidData("component stored as a resource".into()))?;
                 serde_json::from_slice(payload)
                     .map(|value| (id, value))
                     .map_err(|source| Error::Decode {
@@ -634,7 +630,7 @@ impl<T: Resource + Serialize + DeserializeOwned> From<ResourceSave<T>> for Regis
     fn from(value: ResourceSave<T>) -> Self {
         Self {
             key: value.key,
-            kind: 0,
+            role: Role::Global,
             type_id: TypeId::of::<T>(),
             setup: Box::new(move |_| {
                 Box::new(ResourceCodec::<T> {
@@ -676,13 +672,13 @@ impl<T: Resource + Serialize + DeserializeOwned> Codec for ResourceCodec<T> {
             };
             let (payload, references) = entity::references(encode);
             batch.upserts.push(Record {
-                id: 0,
+                owner: RecordOwner::GLOBAL,
                 key: self.key,
                 payload: payload?,
                 references,
             });
         } else if baseline && self.present {
-            batch.deletes.push((0, self.key));
+            batch.deletes.push((RecordOwner::GLOBAL, self.key));
         }
         Ok(None)
     }
@@ -690,9 +686,13 @@ impl<T: Resource + Serialize + DeserializeOwned> Codec for ResourceCodec<T> {
     fn decode(
         &self,
         _world: &mut World,
-        records: &[(i64, Vec<u8>)],
+        records: &[(RecordOwner, Vec<u8>)],
     ) -> Result<Box<dyn Decoded>, Error> {
-        if records.len() > 1 || records.first().is_some_and(|(id, _)| *id != 0) {
+        if records.len() > 1
+            || records
+                .first()
+                .is_some_and(|(owner, _)| *owner != RecordOwner::GLOBAL)
+        {
             return Err(Error::InvalidData("resource stored as components".into()));
         }
         let value = records

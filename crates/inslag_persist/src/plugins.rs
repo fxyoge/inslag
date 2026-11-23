@@ -3,7 +3,10 @@ use bevy_time::{Real, Time};
 use std::path::{Path, PathBuf};
 
 use super::*;
-use crate::lifecycle::{CheckReadiness, SaveSession, has_work, process, update_interval};
+use crate::{
+    backend::Storage,
+    lifecycle::{CheckReadiness, SaveSession, has_work, process, update_interval},
+};
 
 pub struct SavePlugin {
     directory: PathBuf,
@@ -51,7 +54,7 @@ impl Plugin for SavePlugin {
         app.init_resource::<identity::Identities>()
             .init_resource::<registration::Registry>()
             .init_resource::<SaveStatus>()
-            .insert_resource(storage::Storage::sqlite(self.directory.clone()));
+            .insert_resource(Storage::sqlite(self.directory.clone()));
         assert!(
             self.interval.is_none() || app.world().contains_resource::<Time<Real>>(),
             "autosave requires TimePlugin before SavePlugin"

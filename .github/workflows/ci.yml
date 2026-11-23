@@ -34,6 +34,8 @@ jobs:
         cache: false
     - name: Check formatting
       run: mise run lint:fmt
+    - name: Check generated SQLite bindings
+      run: mise run lint:persist-sql
 
   test:
     name: Workspace (${{ matrix.os }}, Rust ${{ matrix.rust }}, ${{ matrix.features }} features)

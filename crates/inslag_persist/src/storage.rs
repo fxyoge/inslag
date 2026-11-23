@@ -1,23 +1,16 @@
 use crate::{
-    SaveHandle, SaveInfo, entity,
+    SaveHandle,
+    backend::{Batch, Manifest, Pending, Records, SaveBundle, Storage, StoredSave, WriteMode},
+    entity,
     identity::{Identities, Identity, IdentityChanges},
-    registration::{Batch, Registry},
+    registration::Registry,
 };
 use bevy_ecs::{
     change_detection::Tick,
     entity::{Entity, EntityHashMap},
     prelude::*,
 };
-use std::{
-    collections::{BTreeMap, HashMap},
-    path::PathBuf,
-    sync::{
-        Arc, Mutex,
-        mpsc::{Receiver, RecvError, TryRecvError},
-    },
-};
-
-mod sqlite;
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -43,10 +36,19 @@ pub enum Error {
         #[source]
         source: serde_json::Error,
     },
-    #[error("save file: {0}")]
+    #[error("save storage: {0}")]
     Io(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("unrecognized database or unsupported save format")]
     Format,
+    #[error("save schema revision {found} is newer than supported revision {supported}")]
+    SchemaTooNew { found: u32, supported: u32 },
+    #[error("save migration {revision} ({name}) failed: {source}")]
+    Migration {
+        revision: u32,
+        name: &'static str,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("persistent type keys/roles do not match this save's manifest")]
     Manifest,
     #[error("save generation changed: expected {expected}, found {actual}; load before retrying")]
@@ -76,50 +78,8 @@ pub struct SaveStats {
     /// Counts records, not entities; includes snapshot rewrites.
     pub upserts: usize,
     pub deletions: usize,
-    /// Payload only; excludes SQL/index/WAL overhead.
+    /// Payload only; excludes storage overhead.
     pub bytes: usize,
-}
-
-struct SaveBundle {
-    expected_generation: u64,
-    manifest: BTreeMap<String, i64>,
-    replace_records: bool,
-    rewrite_manifest: bool,
-    added_entities: Vec<i64>,
-    removed_entities: Vec<i64>,
-    entity_count: usize,
-    batch: Batch,
-}
-
-pub(crate) struct StoredSave {
-    generation: u64,
-    entities: Vec<i64>,
-    records: BTreeMap<String, Vec<(i64, Vec<u8>)>>,
-    manifest: BTreeMap<String, i64>,
-}
-
-trait Backend: Send + Sync {
-    fn commit(&self, handle: SaveHandle, bundle: SaveBundle) -> Result<Pending<SaveStats>, Error>;
-    fn read(&self, handle: SaveHandle) -> Result<Pending<StoredSave>, Error>;
-    fn list(&self) -> Result<Pending<Vec<SaveInfo>>, Error>;
-}
-
-pub(crate) struct Pending<T>(Mutex<Receiver<Result<T, Error>>>);
-
-impl<T> Pending<T> {
-    pub(crate) fn poll(&mut self) -> Option<Result<T, Error>> {
-        match self.0.get_mut().expect("receiver poisoned").try_recv() {
-            Ok(result) => Some(result),
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => Some(Err(RecvError.into())),
-        }
-    }
-}
-
-impl From<RecvError> for Error {
-    fn from(error: RecvError) -> Self {
-        Self::Io(Box::new(error))
-    }
 }
 
 pub(crate) struct Saving {
@@ -128,33 +88,12 @@ pub(crate) struct Saving {
     identities: IdentityChanges,
 }
 
-#[derive(Resource)]
-pub(crate) struct Storage {
-    backend: Box<dyn Backend>,
-}
-
-impl Storage {
-    pub(crate) fn sqlite(directory: PathBuf) -> Self {
-        Self {
-            backend: Box::new(sqlite::Sqlite::new(directory)),
-        }
-    }
-
-    pub(crate) fn read(&self, handle: SaveHandle) -> Result<Pending<StoredSave>, Error> {
-        self.backend.read(handle)
-    }
-
-    pub(crate) fn list(&self) -> Result<Pending<Vec<SaveInfo>>, Error> {
-        self.backend.list()
-    }
-}
-
 pub(crate) fn begin_save(world: &mut World, handle: SaveHandle) -> Result<Saving, Error> {
     world.flush();
     world.resource_scope(|world, mut registry: Mut<Registry>| {
         let bundle = capture(world, &mut registry)?;
         let tick = world.read_change_tick();
-        let pending = world.resource::<Storage>().backend.commit(handle, bundle)?;
+        let pending = world.resource::<Storage>().commit(handle, bundle)?;
         for entry in &mut registry.entries {
             entry.codec.begin_commit(world);
         }
@@ -220,10 +159,15 @@ fn capture(world: &mut World, registry: &mut Registry) -> Result<SaveBundle, Err
         manifest: registry
             .entries
             .iter()
-            .map(|entry| (entry.key.to_owned(), entry.kind))
+            .map(|entry| (entry.key.to_owned(), entry.role))
             .collect(),
-        replace_records: !baseline,
-        rewrite_manifest: registry.rewrite_manifest,
+        mode: if registry.rewrite_manifest {
+            WriteMode::ReplaceAll
+        } else if baseline {
+            WriteMode::Incremental
+        } else {
+            WriteMode::ReplaceRecords
+        },
         added_entities,
         removed_entities: ids
             .removed
@@ -294,12 +238,12 @@ pub(crate) fn restore(world: &mut World, saved: &StoredSave) -> Result<(), Error
     })
 }
 
-fn check_load_manifest(actual: &BTreeMap<String, i64>, registry: &Registry) -> Result<(), Error> {
-    for (key, kind) in actual {
+fn check_load_manifest(actual: &Manifest, registry: &Registry) -> Result<(), Error> {
+    for (key, role) in actual {
         if !registry
             .entries
             .iter()
-            .any(|entry| entry.key == key && entry.kind == *kind)
+            .any(|entry| entry.key == key && entry.role == *role)
         {
             return Err(Error::Manifest);
         }
@@ -311,12 +255,13 @@ fn restore_records(
     world: &mut World,
     registry: &mut Registry,
     saved_ids: &[i64],
-    records: &BTreeMap<String, Vec<(i64, Vec<u8>)>>,
-    manifest: &BTreeMap<String, i64>,
+    records: &Records,
+    manifest: &Manifest,
 ) -> Result<(), Error> {
     let next = saved_ids
-        .last()
+        .iter()
         .copied()
+        .max()
         .unwrap_or(0)
         .checked_add(1)
         .ok_or_else(|| Error::InvalidData("persistent entity IDs exhausted".into()))?;
@@ -458,14 +403,13 @@ mod tests {
         world.spawn(Value(3));
 
         let storage = world.resource::<Storage>();
-        let backend = &storage.backend;
-        let stats = complete(&mut backend.commit(handle, bundle).unwrap()).unwrap();
+        let stats = complete(&mut storage.commit(handle, bundle).unwrap()).unwrap();
         assert_eq!((stats.generation, stats.entities, stats.upserts), (2, 1, 1));
-        let saved = complete(&mut backend.read(handle).unwrap()).unwrap();
-        let [(id, bytes)] = saved.records["value"].as_slice() else {
+        let saved = complete(&mut storage.read(handle).unwrap()).unwrap();
+        let [(owner, bytes)] = saved.records["value"].as_slice() else {
             panic!("expected one saved value");
         };
-        assert_eq!(saved.entities, [*id]);
+        assert_eq!(saved.entities, [owner.entity_id().unwrap()]);
         assert_eq!(serde_json::from_slice::<Value>(bytes).unwrap().0, 2);
     }
 
@@ -483,9 +427,9 @@ mod tests {
             .resource_scope(|world, mut registry: Mut<Registry>| capture(world, &mut registry))
             .unwrap();
         bundle.batch.upserts[0].references.push(i64::MAX);
-        let backend = &world.resource::<Storage>().backend;
-        assert!(complete(&mut backend.commit(handle, bundle).unwrap()).is_err());
-        assert!(complete(&mut backend.list().unwrap()).unwrap().is_empty());
+        let storage = world.resource::<Storage>();
+        assert!(complete(&mut storage.commit(handle, bundle).unwrap()).is_err());
+        assert!(complete(&mut storage.list().unwrap()).unwrap().is_empty());
 
         let mut saving = begin_save(world, handle).unwrap();
         let result = complete(&mut saving.pending);
