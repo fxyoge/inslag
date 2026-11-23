@@ -66,14 +66,6 @@ fn app(directory: &tempfile::TempDir) -> App {
     app
 }
 
-fn definition(name: &str, body: &str) -> StateTreeDefinition {
-    let source = format!(
-        r#"<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:ist="urn:inslag-state-tree" datamodel="luau">{body}</scxml>"#,
-    );
-    inslag_state_tree::scxml::compile(&inslag_state_tree::scxml::parse(name, &source).unwrap())
-        .unwrap()
-}
-
 fn spawn(app: &mut App, name: &str, body: &str) -> Entity {
     let definition = app
         .world_mut()
@@ -85,6 +77,14 @@ fn spawn(app: &mut App, name: &str, body: &str) -> Entity {
         .id();
     app.world_mut().run_schedule(Update);
     entity
+}
+
+fn definition(name: &str, body: &str) -> StateTreeDefinition {
+    let source = format!(
+        r#"<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:ist="urn:inslag-state-tree" datamodel="luau">{body}</scxml>"#,
+    );
+    inslag_state_tree::scxml::compile(&inslag_state_tree::scxml::parse(name, &source).unwrap())
+        .unwrap()
 }
 
 fn owner(app: &mut App) -> Entity {

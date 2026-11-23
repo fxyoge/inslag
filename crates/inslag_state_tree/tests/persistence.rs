@@ -42,6 +42,11 @@ struct Runs(Vec<(Token, i64)>);
 struct Starts(usize);
 #[derive(Resource)]
 struct ConsumersEnabled(bool);
+fn sqlite_app(directory: &tempfile::TempDir) -> App {
+    let mut app = app();
+    app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")));
+    app
+}
 fn app() -> App {
     let mut app = App::new();
     app.add_plugins((
@@ -60,11 +65,6 @@ fn app() -> App {
             .run_if(|enabled: Res<ConsumersEnabled>| enabled.0),
     );
     configure(&mut app);
-    app
-}
-fn sqlite_app(directory: &tempfile::TempDir) -> App {
-    let mut app = app();
-    app.add_plugins(SavePlugin::sqlite(directory.path().join("save.sqlite")));
     app
 }
 fn definition(updated: bool) -> StateTreeDefinition {

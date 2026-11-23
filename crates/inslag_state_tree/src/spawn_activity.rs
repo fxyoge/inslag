@@ -514,6 +514,16 @@ mod tests {
         assert_eq!(instance_count(&mut app), 1);
     }
 
+    #[cfg(feature = "persistence")]
+    fn sqlite_app(directory: &tempfile::TempDir) -> App {
+        let mut app = app();
+        app.add_plugins(
+            inslag_persist::SavePlugin::sqlite(directory.path().join("save.sqlite"))
+                .load_on_start(false),
+        );
+        app
+    }
+
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins((
@@ -527,16 +537,6 @@ mod tests {
             },
             crate::StateTreePlugin::new(Update),
         ));
-        app
-    }
-
-    #[cfg(feature = "persistence")]
-    fn sqlite_app(directory: &tempfile::TempDir) -> App {
-        let mut app = app();
-        app.add_plugins(
-            inslag_persist::SavePlugin::sqlite(directory.path().join("save.sqlite"))
-                .load_on_start(false),
-        );
         app
     }
 
