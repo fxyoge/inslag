@@ -3,13 +3,14 @@ name = "inslag_persist"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Typed, benchmark-driven SQLite saves for Bevy"
+description = "Typed, benchmark-driven saves for Bevy"
 license.workspace = true
 repository.workspace = true
 
 [features]
 default = ["sqlite"]
 sqlite = ["dep:rusqlite"]
+indexeddb = ["dep:js-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures"]
 
 [dependencies]
 inslag_persist_macros.workspace = true
@@ -20,10 +21,18 @@ bevy_transform = { workspace = true, features = ["serialize"] }
 bevy_asset.workspace = true
 bevy_time.workspace = true
 getrandom = "0.4"
-rusqlite = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+rusqlite = { workspace = true, optional = true }
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+js-sys = { version = "0.3", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
 
 [dev-dependencies]
 divan.workspace = true

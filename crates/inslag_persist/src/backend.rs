@@ -9,7 +9,9 @@ use std::{
     },
 };
 
-#[cfg(feature = "sqlite")]
+#[cfg(all(feature = "indexeddb", target_arch = "wasm32", target_os = "unknown"))]
+mod indexeddb;
+#[cfg(all(feature = "sqlite", not(target_family = "wasm")))]
 mod sqlite;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

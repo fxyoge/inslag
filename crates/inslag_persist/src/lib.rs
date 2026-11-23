@@ -65,7 +65,10 @@ pub use plugins::SavePlugin;
 
 pub mod adapter;
 #[cfg_attr(
-    not(feature = "sqlite"),
+    not(any(
+        all(feature = "sqlite", not(target_family = "wasm")),
+        all(feature = "indexeddb", target_arch = "wasm32", target_os = "unknown")
+    )),
     allow(dead_code, reason = "no backend enabled")
 )]
 mod backend;
