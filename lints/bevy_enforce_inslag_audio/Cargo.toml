@@ -17,7 +17,7 @@ bevy_app = "=0.20.1"
 bevy_asset = "=0.20.1"
 bevy_audio = { version = "=0.20.1", features = ["wav"] }
 bevy_ecs = "=0.20.1"
-rodio = { version = "0.22", default-features = false }
+rodio = { version = "0.23", default-features = false }
 
 [lints]
 workspace = true
